@@ -156,6 +156,7 @@ class Enemy:
         self.ranged_attack_range = 600  # Distance at which the enemy will use ranged attacks
         self.projectile_speed = 10
         self.projectiles = []  # List to store active projectiles
+        self.projectile_image = None # Default to None, subclasses should set this
 
     def load_frame_sheet(self, sprite_file_path, frame_width, frame_height, rows, cols):
         """Loads a sprite sheet and returns a list of frames."""
@@ -180,11 +181,13 @@ class Enemy:
                 self.current_action = 'death'
                 self.current_frame = 0
             else:
-                self.is_taking_hit = True
-                self.current_action = 'takehit'
-                self.current_frame = 0
-                self.hit_animation_timer = len(
-                    self.frames['takehit']) * self.frame_delay  # Adjust based on animation length
+                if 'takehit' in self.frames:
+                    self.is_taking_hit = True
+                    self.current_action = 'takehit'
+                    self.current_frame = 0
+                    self.hit_animation_timer = len(self.frames['takehit']) * self.frame_delay
+                else:
+                    self.is_taking_hit = False
 
     def update(self, player):
         """Update the enemy state, position, and check for collisions."""
@@ -363,51 +366,24 @@ class Enemy:
                 'dx': dx * self.projectile_speed,
                 'dy': dy * self.projectile_speed,
                 'damage': self.damage,
-                'image': self.projectile_image
+                'image': self.projectile_image if self.projectile_image else pygame.Surface((10, 10))
             }
+
+            # If no image, fill with a placeholder color (magenta for visibility)
+            if not self.projectile_image:
+                projectile['image'].fill((255, 0, 255))
 
             # Add to projectiles list and reset cooldown to 2 seconds (120 frames)
             self.projectiles.append(projectile)
             self.ranged_attack_cooldown = 120  # 2 second cooldown at 60 FPS
 
+    def distance_to(self, target):
+        """Calculate Euclidean distance to a target (player or object)."""
+        return math.hypot(self.x - target.x, self.y - target.y)
+
     def update_behavior(self, player):
         """Default enemy behavior (to be overridden by subclasses)."""
         pass
-        def update_ai(self, player):
-            """Enhanced AI decision-making"""
-        if self.health < self.max_health * 0.3 and random.random() < 0.1:
-            self._execute_tactical_retreat(player)
-        else:
-            self._execute_adaptive_attack(player)
-        pass
-            
-    def _execute_adaptive_attack(self, player):
-        """Choose attack pattern based on situation"""
-        distance = self.distance_to(player)
-        
-        if distance < self.melee_range:
-            self.melee_attack(player)
-        elif distance < self.ranged_range:
-            if random.random() < 0.7:  # 70% chance for aimed shot
-                self.predictive_ranged_attack(player)
-            else:  # 30% chance for spread shot
-                self.spread_attack(player, 3, 15)
-                
-    def predictive_ranged_attack(self, player):
-        """Lead shots based on player movement"""
-        travel_time = self.distance_to(player) / self.projectile_speed
-        predicted_x = player.x + player.dx * travel_time
-        predicted_y = player.y + player.dy * travel_time
-        self.shoot_projectile(predicted_x, predicted_y)
-        
-    def spread_attack(self, player, num_shots, spread_angle):
-        """Fan-shaped projectile spread"""
-        base_angle = math.degrees(math.atan2(player.y-self.y, player.x-self.x))
-        for i in range(num_shots):
-            angle = base_angle + spread_angle * (i - num_shots//2)
-            dx = math.cos(math.radians(angle))
-            dy = math.sin(math.radians(angle))
-            self.shoot_projectile(self.x + dx*50, self.y + dy*50)
 
 
     def draw(self, surface):
@@ -518,81 +494,12 @@ class EnemySwarm:
                 enemy.ranged_attack(player)
 
 # Basic enemy classes with their own load_frames functions
-class EvilWizard(Enemy):
-    def __init__(self, x, y):
-        super().__init__(x, y, speed=0.75, health=200, damage=2.5, acceptance_radius=10, scale=1.5)
-        self.projectile_image = pygame.image.load("Sprites/Sprites_Effect/Bullets/13.png").convert_alpha()
-        self.projectile_image = pygame.transform.scale(self.projectile_image, (30, 18))  # Adjust size as needed
-        self.ranged_attack_range = 600  # Even longer range for wizard
-        self.projectile_speed = 10  # Faster projectiles
-        self.load_frames()
 
-    def load_frames(self):
-        """Load frames for each action of Evil Wizard."""
-        self.frames['attack1'] = self.load_frame_sheet("Sprites/Sprites_Enemy/Evil Wizard/Attack1.png", 250, 250, 1, 8)
-        self.frames['attack2'] = self.load_frame_sheet("Sprites/Sprites_Enemy/Evil Wizard/Attack2.png", 250, 250, 1, 8)
-        self.frames['death'] = self.load_frame_sheet("Sprites/Sprites_Enemy/Evil Wizard/Death.png", 250, 250, 1, 7)
-        self.frames['idle'] = self.load_frame_sheet("Sprites/Sprites_Enemy/Evil Wizard/Idle.png", 250, 250, 1, 8)
-        self.frames['run'] = self.load_frame_sheet("Sprites/Sprites_Enemy/Evil Wizard/Run.png", 250, 250, 1, 8)
-        self.frames['takehit'] = self.load_frame_sheet("Sprites/Sprites_Enemy/Evil Wizard/Take hit.png", 250, 250, 1, 3)
-
-    def update_behavior(self, player):
-        """Wizard Boss chase and attack when close."""
-        distance = ((player.x - self.x) ** 2 + (player.y - self.y) ** 2) ** 0.5
-        new_action = 'idle' if distance > 150 else 'attack2' if distance > self.acceptance_radius else 'attack1'
-
-        if new_action != self.current_action:  # Only change if different
-            self.current_action = new_action
-            self.current_frame = 0  # Reset animation frame
-
-        # Shoot projectiles if in range
-        if distance < self.ranged_attack_range:
-            self.shoot_projectile(player.x,player.y)
-        # Line of sight check
-        if self.has_line_of_sight(player):
-            # Advanced spell patterns
-            if self.attack_cooldown <= 0:
-                self.cast_spread_spell(player)
-                self.attack_cooldown = 45
-            else:
-                self.attack_cooldown -= 1
-
-
-
-            # Summon minions when damaged
-            if self.health < self.max_health * 0.5 and not self.has_summoned:
-                self.summon_minions()
-                self.has_summoned = True
-
-    def cast_spread_spell(self, target):
-        for angle in range(-30, 31, 15):
-            dx = math.cos(math.radians(angle))
-            dy = math.sin(math.radians(angle))
-            self.shoot_projectile(target.x + dx * 50, target.y + dy * 50)
-
-    def distance_to(self, target):
-        """Calculate Euclidean distance to a target (player or object)."""
-        return ((self.x - target.x) ** 2 + (self.y - target.y) ** 2) ** 0.5
-
-    def draw(self, surface):
-        """Draw the current frame of the enemy on the screen."""
-        if self.current_action not in self.frames:
-            print(f"Warning: Missing animation frames for action '{self.current_action}' in {type(self).__name__}")
-            return  # Skip drawing if frames are missing
-
-        sprite = self.frames[self.current_action][self.current_frame]
-
-        if not self.look_right:
-            sprite = pygame.transform.flip(sprite, True, False)
-        sprite_rect = sprite.get_rect(center=(self.x, self.y))
-
-        # Draw the sprite
-        surface.blit(sprite, sprite_rect.topleft)
 
 
 class FlyingEye(Enemy):
     def __init__(self, x, y):
-        super().__init__(x, y, speed=0.75, health=100, damage=0.5, acceptance_radius=40, scale=1)
+        super().__init__(x, y, speed=0.75, health=100, damage=0.3, acceptance_radius=40, scale=1)
         self.projectile_image = pygame.image.load("Sprites/Sprites_Effect/Bullets/29.png").convert_alpha()
         self.projectile_image = pygame.transform.scale(self.projectile_image, (30, 18))  # Adjust size as needed
         self.load_frames()
@@ -685,7 +592,7 @@ class FlyingEye(Enemy):
 # Similar classes for Goblin, Mushroom, and Skeleton
 class Goblin(Enemy):
     def __init__(self, x, y):
-        super().__init__(x, y, speed=0.75, health=75, damage=1.5, acceptance_radius=30, scale=1)
+        super().__init__(x, y, speed=0.75, health=75, damage=1.0, acceptance_radius=30, scale=1)
         self.load_frames()
     def distance_to(self, target):
         """Calculate Euclidean distance to a target (player or object)."""
@@ -712,7 +619,7 @@ class Goblin(Enemy):
 
 class Mushroom(Enemy):
     def __init__(self, x, y):
-        super().__init__(x, y, speed=1.25, health=200, damage=2.5, acceptance_radius=40, scale=2)
+        super().__init__(x, y, speed=1.25, health=200, damage=1.8, acceptance_radius=40, scale=2)
         self.load_frames()
 
     def load_frames(self):
@@ -735,7 +642,7 @@ class Mushroom(Enemy):
 
 class Skeleton(Enemy):
     def __init__(self, x, y):
-        super().__init__(x, y, speed=1, health=100, damage=2, acceptance_radius=5, scale=1)
+        super().__init__(x, y, speed=1, health=100, damage=1.5, acceptance_radius=5, scale=1)
         self.load_frames()
 
         self.shield_active = False
@@ -790,7 +697,7 @@ class Skeleton(Enemy):
 ##
 class BigFlyingEye(Enemy):
     def __init__(self, x, y):
-        super().__init__(x, y, speed=0.75, health=200, damage=4, acceptance_radius=100, scale=3)
+        super().__init__(x, y, speed=0.75, health=200, damage=3, acceptance_radius=100, scale=3)
         self.projectile_image = pygame.image.load("Sprites/Sprites_Effect/Bullets/13.png").convert_alpha()
         self.projectile_image = pygame.transform.scale(self.projectile_image, (60, 36))  # Adjust size as needed
         self.load_frames()
@@ -972,8 +879,14 @@ class BigFlyingEye(Enemy):
 
 
 class DashingGoblin(Goblin):
-    def __init__(self, x, y, speed=1, health=200, damage=1.5, acceptance_radius=30, scale=1):
+    def __init__(self, x, y, speed=1.8, health=200, damage=3, acceptance_radius=30, scale=1.0):
         super().__init__(x, y)
+        self.speed = speed
+        self.health = health
+        self.max_health = health
+        self.damage = damage
+        self.acceptance_radius = acceptance_radius
+        self.scale = scale
         self.dash_cooldown = 3 * 60  # 3 seconds at 60 FPS
         self.dash_timer = 0
         self.is_dashing = False
@@ -1050,10 +963,9 @@ class DashingGoblin(Goblin):
             
 
 class TeleportingMushroom(Mushroom):
-
     def __init__(self, x, y):
-            super().__init__(x, y)
-            self.teleport_timer = 0
+        super().__init__(x, y)
+        self.teleport_timer = 0
 
     def update(self, player):
         super().update(player)
@@ -1066,3 +978,161 @@ class TeleportingMushroom(Mushroom):
         """Teleport to a random position."""
         self.x = player.x + random.randint(5, 50)
         self.y = player.y + random.randint(5, 30)
+
+
+class ZombieCrawler(Goblin):
+    """Low profile, hard to detect crawler zombie."""
+    def __init__(self, x, y):
+        super().__init__(x, y)
+        self.speed = 0.5
+        self.scale = 0.7
+        self.health = 50
+        self.damage = 1.2  # High damage if they get close
+        self.detection_range = 300
+
+    def update_behavior(self, player):
+        distance = math.hypot(player.x - self.x, player.y - self.y)
+        if distance < self.detection_range:
+            self.current_action = 'run'
+        else:
+            self.current_action = 'idle'
+
+
+class ZombieExploder(Enemy):
+    """When dead, it explodes causing massive AoE damage."""
+    def __init__(self, x, y):
+        super().__init__(x, y, speed=1.2, health=60, damage=0, acceptance_radius=20, scale=1.2)
+        self.explosion_radius = 100
+        self.explosion_damage = 30
+        self.has_exploded = False
+        self.load_frames()
+
+    def load_frames(self):
+        self.frames['idle'] = self.load_frame_sheet("Sprites/Sprites_Enemy/Mushroom/Idle.png", 150, 150, 1, 4)
+        self.frames['run'] = self.load_frame_sheet("Sprites/Sprites_Enemy/Mushroom/Run.png", 150, 150, 1, 8)
+        self.frames['death'] = self.load_frame_sheet("Sprites/Sprites_Enemy/Mushroom/Death.png", 150, 150, 1, 4)
+        self.frames['attack'] = self.frames['run']
+
+    def update(self, player):
+        super().update(player)
+        if self.is_dead and not self.has_exploded:
+            self.explode(player)
+
+    def explode(self, player):
+        self.has_exploded = True
+        dist = math.hypot(player.x - self.x, player.y - self.y)
+        if dist < self.explosion_radius:
+            player.health -= self.explosion_damage
+        # In main.py we should trigger a visual effect
+
+
+class ZombiePoison(FlyingEye):
+    """Tấn công từ xa bằng chất độc, làm giảm máu từ từ."""
+    def __init__(self, x, y):
+        super().__init__(x, y)
+        self.speed = 0.85
+        self.health = 80
+        self.damage = 0.05 # Poison tick in update (handled in player)
+        self.ranged_attack_range = 400
+        # Use a green-colored projectile if possible or handle poison state in player
+
+    def shoot_projectile(self, target_x, target_y):
+        if self.ranged_attack_cooldown <= 0:
+            super().shoot_projectile(target_x, target_y)
+            # Tag the projectile as poison
+            if self.projectiles:
+                self.projectiles[-1]['poison'] = True
+
+
+class ZombieCommander(Mushroom):
+    """Có máu cao, gọi thêm zombie xung quanh."""
+    def __init__(self, x, y):
+        super().__init__(x, y)
+        self.health = 400
+        self.max_health = 400
+        self.summon_cooldown = 600
+        self.summon_timer = 0
+        self.scale = 2.5
+
+    def update_behavior(self, player):
+        super().update_behavior(player)
+        self.summon_timer += 1
+        if self.summon_timer >= self.summon_cooldown:
+            self.summon_timer = 0
+            # Summoning is usually handled by returning a signal or via a global list
+            # For now we'll just set a flag that main.py can check
+            self.should_summon = True
+
+    def update(self, player):
+        if not hasattr(self, 'should_summon'):
+            self.should_summon = False
+        super().update(player)
+class EvilWizard(Enemy):
+    """Phap su hac am: Tan cong tu xa bang phep thuat."""
+    def __init__(self, x, y):
+        super().__init__(x, y, speed=1.6, health=180, damage=12, acceptance_radius=400, scale=1.0)
+        self.ranged_attack_range = 450
+        self.lose_aggro_range = 700
+        
+        self.frames = {
+            'idle': self.load_frame_sheet("Sprites/Sprites_Enemy/Evil Wizard/Idle.png", 250, 250, 1, 8),
+            'run': self.load_frame_sheet("Sprites/Sprites_Enemy/Evil Wizard/Run.png", 250, 250, 1, 8),
+            'attack': self.load_frame_sheet("Sprites/Sprites_Enemy/Evil Wizard/Attack1.png", 250, 250, 1, 8),
+            'death': self.load_frame_sheet("Sprites/Sprites_Enemy/Evil Wizard/Death.png", 250, 250, 1, 7)
+        }
+        # Load magic projectile image
+        try:
+            self.projectile_image = pygame.image.load("Sprites/Sprites_Effect/Bullets/21.png").convert_alpha()
+            self.projectile_image = pygame.transform.scale(self.projectile_image, (32, 32))
+        except:
+            self.projectile_image = None
+
+    def update_behavior(self, player):
+        """Wizard behavior: maintain distance and cast spells."""
+        distance = self.distance_to(player)
+        
+        # Determine animation action
+        if distance > self.lose_aggro_range:
+            new_action = 'idle'
+        elif distance > self.ranged_attack_range:
+            new_action = 'run'
+        else:
+            new_action = 'attack'
+            
+        if new_action != self.current_action:
+            self.current_action = new_action
+            self.current_frame = 0
+            
+        # Attack logic
+        if distance <= self.ranged_attack_range:
+            self.shoot_projectile(player.x, player.y)
+
+    def shoot_projectile(self, target_x, target_y):
+        if self.ranged_attack_cooldown <= 0:
+            super().shoot_projectile(target_x, target_y)
+            # Witchcraft effect: slow projectile but tracks slightly
+            if self.projectiles:
+                self.projectiles[-1]['speed'] = 4.5
+                self.projectiles[-1]['color'] = (180, 50, 255)
+
+class OldGuardian(Enemy):
+    """Boss canh gac co dai: Mau cuc trau, danh can chien cuc manh."""
+    def __init__(self, x, y):
+        super().__init__(x, y, speed=0.8, health=1200, damage=30, acceptance_radius=60, scale=2.4)
+        self.ranged_attack_range = 80 # Melee but uses state machine
+        self.lose_aggro_range = 1000
+        
+        self.frames = {
+            'idle': self.load_frame_sheet("Sprites/Sprites_Enemy/Old_Guardian/Old_Guardian_idle.png", 120, 120, 6, 1),
+            'run': self.load_frame_sheet("Sprites/Sprites_Enemy/Old_Guardian/Old_Guardian_walk.png", 120, 120, 8, 1),
+            'attack': self.load_frame_sheet("Sprites/Sprites_Enemy/Old_Guardian/Old_Guardian_attack_1.png", 120, 120, 10, 1),
+            'death': self.load_frame_sheet("Sprites/Sprites_Enemy/Old_Guardian/Old_Guardian_death.png", 120, 120, 10, 1)
+        }
+        
+    def update(self, player):
+        super().update(player)
+        # Boss logic: Can chien manh, co the them effect rung man hinh
+        if self.current_action == 'attack' and self.current_frame == 3:
+            dist = math.hypot(player.x - self.x, player.y - self.y)
+            if dist < 120:
+                player.health -= self.damage * 0.1 # Tick damage or big hit
