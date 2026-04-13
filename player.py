@@ -9,10 +9,13 @@ class Player:
         self.speed = 5  # Movement speed
         self.dx = 0
         self.dy = 0
-        self.health = 100
-        self.max_health = 100
+        self.health = 300
+        self.max_health = 300
         self.armor = 0
         self.hitbox_size = 26
+        self.stamina = 100
+        self.max_stamina = 100
+        self.poison_timer = 0
 
         # Load the sprite sheet
         self.sprite_sheet = pygame.image.load("Sprites/Sprites_Player/mega_scientist_walk.png").convert_alpha()
@@ -37,10 +40,21 @@ class Player:
         }
         return frames
 
+    def take_damage(self, amount):
+        """Handle damage with armor reduction."""
+        if self.armor > 0:
+            reduction = min(self.armor, amount * 0.4) # 40% reduction if armor exists
+            self.armor -= reduction * 0.5 # Armor takes half the reduction amount as wear
+            amount -= reduction
+        self.health -= amount
+
     def update(self, keys, blocked_tiles=None, map_width=None, map_height=None, tile_size=16):
         """Update player position, collision and animation based on input."""
         dx, dy = 0, 0  # Movement vector components
         moving = False
+        running = keys[pygame.K_LSHIFT] and self.stamina > 0
+
+        current_speed = self.speed * 1.6 if running else self.speed
 
         # Movement logic
         #up-down 
@@ -62,17 +76,32 @@ class Player:
             self.direction = "right"
             moving = True
 
+        # Stamina logic
+        if moving:
+            if running:
+                self.stamina = max(0, self.stamina - 0.5)
+            else:
+                self.stamina = min(self.max_stamina, self.stamina + 0.2)
+        else:
+            self.stamina = min(self.max_stamina, self.stamina + 0.4)
+
         # Normalize the movement vector
         if dx != 0 or dy != 0:  # If there's movement
             magnitude = (dx ** 2 + dy ** 2) ** 0.5
             dx /= magnitude
             dy /= magnitude
 
-        self.dx = dx * self.speed
-        self.dy = dy * self.speed
+        self.dx = dx * current_speed
+        self.dy = dy * current_speed
 
         self._move_axis(self.dx, 0, blocked_tiles, map_width, map_height, tile_size)
         self._move_axis(0, self.dy, blocked_tiles, map_width, map_height, tile_size)
+
+        # Handle poison
+        if self.poison_timer > 0:
+            self.poison_timer -= 1
+            if self.poison_timer % 60 == 0:
+                self.health -= 1
 
         # Update animation frame
         if moving:

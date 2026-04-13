@@ -8,6 +8,12 @@ OVERLAY = (10, 8, 12, 180)
 PANEL = (24, 26, 34)
 FPS = 60
 import pygame
+import math
+import os
+import random
+import sys
+import glob
+from dataclasses import dataclass, field
 
 # Định nghĩa các màu cơ bản
 BLACK = (0, 0, 0)
@@ -19,74 +25,42 @@ CYAN = (0, 255, 255)
 YELLOW = (255, 255, 0)
 ORANGE = (255, 165, 0)
 
-"""
-Shop chọn card (vũ khí, pet, hiệu ứng) xuất hiện khi nhấn S.
-Đổi nhạc nền khi qua màn hoặc khi vào boss.
-Hiệu ứng âm thanh khi bắn, trúng địch, dùng kỹ năng, mở rương.
-Hiển thị pet đồng hành và cho phép đổi pet.
-Hiển thị card shop, pet, weapon ngẫu nhiên khi mở shop.
-Hướng dẫn phím tắt mới trên giao diện.
-"""
-import math
-import os
-import random
-import sys
-from dataclasses import dataclass, field
-
-import pygame
-
-from enemy import FlyingEye, Goblin, Mushroom, Skeleton, BigFlyingEye, DashingGoblin, TeleportingMushroom
-from pathfinding import a_star, bfs, dfs, greedy_safe
-from player import Player
-from weapon import WeaponManager
-from all_graphics import ALL_GRAPHICS
-
 pygame.init()
 
-# Tự động load toàn bộ file đồ họa vào dict ALL_GRAPHICS_SURFACES
-ALL_GRAPHICS_SURFACES = {}
-for path in ALL_GRAPHICS:
-    try:
-        img = pygame.image.load(path).convert_alpha()
-        ALL_GRAPHICS_SURFACES[path] = img
-    except Exception as e:
-        print(f"[GRAPHICS LOAD ERROR] {path}: {e}")
-from skill import SkillManager, Skill
-
-
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-os.chdir(BASE_DIR)
-
-
-pygame.init()
-
-
-TILE_SIZE = 16
-GRID_SIZE = 44
-# SCREEN_WIDTH và SCREEN_HEIGHT sẽ được lấy từ infoObject phía dưới
-MAP_WIDTH = TILE_SIZE * GRID_SIZE
-MAP_HEIGHT = TILE_SIZE * GRID_SIZE
-# screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-
-# --- FULLSCREEN + TỰ ĐỘNG LOAD ASSET ---
+# --- Cấu hình màn hình (Bắt buộc trước khi load ảnh có .convert_alpha) ---
 SIDEBAR_WIDTH = 256
-import glob
 SCREEN_WIDTH = 1200
 SCREEN_HEIGHT = 800
 MAP_WIDTH = SCREEN_WIDTH - SIDEBAR_WIDTH
 MAP_HEIGHT = SCREEN_HEIGHT
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-pygame.display.set_caption("San thuong cuoi: Thoat khoi thanh pho")
+pygame.display.set_caption("Last Roof: Escape City")
 clock = pygame.time.Clock()
+
+from enemy import FlyingEye, Goblin, Mushroom, Skeleton, BigFlyingEye, DashingGoblin, TeleportingMushroom, EvilWizard, OldGuardian
+from pathfinding import a_star, bfs, dfs, greedy_safe
+from player import Player
+from weapon import WeaponManager
+from all_graphics import ALL_GRAPHICS
+from camera import Camera
 
 # Tự động load toàn bộ file đồ họa vào dict ALL_GRAPHICS_SURFACES
 ALL_GRAPHICS_SURFACES = {}
 for path in ALL_GRAPHICS:
     try:
+        # Tải ảnh và chuyển đổi sang định dạng pixel của màn hình
         img = pygame.image.load(path).convert_alpha()
         ALL_GRAPHICS_SURFACES[path] = img
     except Exception as e:
         print(f"[GRAPHICS LOAD ERROR] {path}: {e}")
+
+from skill import SkillManager, Skill
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+os.chdir(BASE_DIR)
+
+TILE_SIZE = 16
+GRID_SIZE = 44
 
 # Tự động load toàn bộ card shop
 SHOP_CARD_SURFACES = {}
@@ -186,6 +160,8 @@ DESERT_TILE_ALT = safe_load("Sprites/Sprites_Environment/desert_tile2.png", (TIL
 DESERT_GRASS = safe_load("Sprites/Sprites_Environment/desert_grass_patch.png", (TILE_SIZE, TILE_SIZE))
 DESERT_GRASS_TUFT = safe_load("Sprites/Sprites_Environment/desert_grass.png", (TILE_SIZE, TILE_SIZE))
 DESERT_ROCK = safe_load("Sprites/Sprites_Environment/desert_rock_tile.png", (TILE_SIZE, TILE_SIZE))
+DESERT_WALL = DESERT_ROCK.copy()
+DESERT_WALL.fill((40, 40, 52), special_flags=pygame.BLEND_RGB_MULT)
 DESERT_HUT = safe_load("Sprites/Sprites_Environment/desert_Hut.png", (64, 64))
 DESERT_BIG_GRASS = safe_load("Sprites/Sprites_Environment/desert_big_grass.png", (44, 44))
 DESERT_BIG_ROCK = safe_load("Sprites/Sprites_Environment/desert_big_rock.png", (54, 54))
@@ -217,6 +193,7 @@ EYE_TRAILER = safe_sheet_frame("Sprites/Sprites_Enemy/Flying eye/Flight.png", (0
 MUSHROOM_TRAILER = safe_sheet_frame("Sprites/Sprites_Enemy/Mushroom/Run.png", (0, 0, 150, 150), (220, 220))
 ROCKET_LAUNCHER_TRAILER = safe_load("Sprites/Sprites_Weapon/RPG-reisized.png", (200, 90))
 MORTAR_TRAILER = safe_load("Sprites/Sprites_Building/SuperMortar.png", (180, 180))
+HELICOPTER = safe_load("Sprites/Sprites_Building/Helicopter.png", (150, 150))
 
 WEAPON_DROP_POOL = [
     {
@@ -227,6 +204,7 @@ WEAPON_DROP_POOL = [
         "projectile_speed": 9,
         "damage": 48,
         "projectile_scale": (36, 36),
+        "type": "rifle"
     },
     {
         "name": "SMG",
@@ -236,6 +214,7 @@ WEAPON_DROP_POOL = [
         "projectile_speed": 10,
         "damage": 34,
         "projectile_scale": (34, 34),
+        "type": "smg"
     },
     {
         "name": "Sniper",
@@ -245,8 +224,41 @@ WEAPON_DROP_POOL = [
         "projectile_speed": 12,
         "damage": 170,
         "projectile_scale": (42, 42),
+        "type": "sniper"
+    },
+    {
+        "name": "Katana",
+        "fire_rate": 2.5,
+        "reload_time": 0.0,
+        "image_path": "Sprites/Sprites_Weapon/Katana.png",
+        "projectile_speed": 0,
+        "damage": 85,
+        "projectile_image": "Sprites/Sprites_Effect/Bullets/KatanaSlash.png",
+        "projectile_scale": (160, 160),
+        "type": "melee"
+    },
+    {
+        "name": "Plasma Gun",
+        "fire_rate": 6.0,
+        "reload_time": 1.2,
+        "image_path": "Sprites/Sprites_Weapon/PlasmaGun.png",
+        "projectile_speed": 15,
+        "damage": 95,
+        "projectile_scale": (48, 48),
+        "type": "plasma"
     },
 ]
+
+ITEM_SURFACES = {
+    "heal": safe_load("Sprites/Sprites_Weapon/Grenade-2.png", (24, 24)), # Use grenade as medkit icon for now or another
+    "armor": safe_load("Sprites/Sprites_Effect/Pet_Power.png", (24, 24)),
+    "ammo": safe_load("Sprites/Sprites_Weapon/Amo1.png", (20, 20)),
+    "weapon": safe_load("Sprites/Sprites_Weapon/Shotgun-4.png", (34, 24)),
+    "rocket_weapon": safe_load("Sprites/Sprites_Weapon/RPG-reisized.png", (38, 38)),
+    "gate": safe_load("Sprites/Sprites_Weapon/Amo6.png", (24, 24)),
+    "signal": safe_load("Sprites/Sprites_Weapon/AmoB1.png", (24, 24)),
+    "flare": safe_load("Sprites/Sprites_Weapon/Grenade-1.png", (24, 24)),
+}
 
 
 @dataclass
@@ -259,7 +271,18 @@ class ItemPickup:
     color: tuple[int, int, int] = GREEN
     collected: bool = False
     weapon_data: dict | None = None
+    sprite_surface: pygame.Surface | None = None
 
+
+@dataclass
+class Particle:
+    x: float
+    y: float
+    dx: float
+    dy: float
+    life: int
+    color: tuple
+    size: int
 
 @dataclass
 class NPC:
@@ -391,6 +414,12 @@ class MissionTracker:
                 ("Ho tro y ta song sot", d["npc_saved"] >= 1),
                 ("Mo duong xuong tang 1", d["gate_opened"]),
             ]
+        if cid == "escape":
+            return [
+                ("Ha boss Old Guardian", d["boss_down"]),
+                ("Cho truc thang den (1 phut)", d.get("helicopter_arrived", False)),
+                ("Len truc thang de thoat", False)
+            ]
         return [
             ("Mo cong ra san", d["gate_opened"]),
             ("Kich hoat tin hieu cuu ho", d["signal_started"]),
@@ -402,79 +431,98 @@ class MissionTracker:
         return all(done for _, done in self.objectives())
 
 
+from camera import Camera
+from npc_data import get_random_npcs_for_chunk, reset_spawned_chunks
+
 class Game:
     def __init__(self):
         self.font = load_ui_font(22)
-        # Pet mặc định (nếu chưa chọn pet, sẽ là PET_BIRD)
-        self.current_pet = PET_BIRD
         self.font_big = load_ui_font(40, bold=True)
         self.font_title = load_ui_font(64, bold=True)
         self.font_small = load_ui_font(18)
-        self.player = Player(120, 120)
+        
+        self.camera = Camera(SCREEN_WIDTH, SCREEN_HEIGHT, SIDEBAR_WIDTH)
+        self.player = Player(400, 400)
         self.weapon_manager = WeaponManager()
+        self.story_flags = set()
+        self.last_hint_path = []
+        self.last_spawn_at = 0
+        self.shot_counter = 0
+        self.frenzy_window_until = 0
+        self.kill_count = 0
+        self.saved_npcs = 0
+        self.end_reason = ""
+        
         # --- Kỹ năng ---
         self.skill_manager = SkillManager()
-        # Thêm kỹ năng mẫu, bạn có thể thêm nhiều kỹ năng khác nhau ở đây
+        # Sử dụng hệ thống cắt sheet mới để lấy hiệu ứng cụ thể từ các tấm ảnh tổng hợp
         self.skill_manager.add_skill(Skill(
-            "Fireball", 2000, "Sprites/Sprites_Effect/Bullets/All_Fire_Bullet_Pixel_16x16_05.png",
-            effect_image_path="Sprites/Sprites_Effect/Bullets/Introl Yellow Effect Bullet Impact Explosion 32x32.gif",
-            scale=(40,40), effect_scale=(48,48)
+            "Fireball", 1500, "Sprites/Sprites_Effect/Bullets/Fireball.png",
+            effect_image_paths="Sprites/Sprites_Effect/Bullets/Introl Yellow Effect Bullet Impact Explosion 32x32.gif",
+            rows=4, cols=4, effect_scale=(64, 64), damage=50
         ))
         self.skill_manager.add_skill(Skill(
-            "Ice Blast", 3000, "Sprites/Sprites_Effect/Bullets/Introl Blue Effect Bullet Impact Explosion 32x32.gif",
-            effect_image_path="Sprites/Sprites_Effect/Bullets/Introl Blue Effect Bullet Impact Explosion 32x32.gif",
-            scale=(40,40), effect_scale=(48,48)
+            "Frost Nova", 3000, "Sprites/Sprites_Effect/Bullets/FrostNova.png",
+            effect_image_paths="Sprites/Sprites_Effect/Bullets/Introl Blue Effect Bullet Impact Explosion 32x32.gif",
+            rows=4, cols=4, effect_scale=(128, 128), damage=80
         ))
         self.skill_manager.add_skill(Skill(
-            "Green Wave", 2500, "Sprites/Sprites_Effect/Bullets/Introl Green Effect Bullet Impact Explosion 32x32.gif",
-            effect_image_path="Sprites/Sprites_Effect/Bullets/Introl Green Effect Bullet Impact Explosion 32x32.gif",
-            scale=(40,40), effect_scale=(48,48)
+            "Poison Cloud", 2500, "Sprites/Sprites_Effect/Bullets/25.png",
+            effect_image_paths="Sprites/Sprites_Effect/Bullets/Introl Green Effect Bullet Impact Explosion 32x32.gif",
+            rows=4, cols=4, effect_scale=(96, 96), damage=40
         ))
-        # ---
+        
+        # --- Pets & Loadout ---
+        self.current_pet = PET_BIRD
+        self.unlocked_pets = [PET_BIRD]
+        
+        # --- Infinite Map ---
+        self.chunks = {} # (cx, cy) -> list of objects
+        self.visited_chunks = set()
+        
         self.mouse_down = False
-        self.shot_counter = 0
-        self.frenzy_until = 0
-        self.frenzy_window_until = 0
         self.state = "menu"
         self.show_help = False
+        self.show_shop = False
         self.show_map = False
-        self.debug_path = True
         self.hint_mode_index = 0
         self.hint_modes = ["BFS", "DFS", "SAFE", "A*"]
-        self.radio_log = []
+        
         self.popup = ""
         self.popup_timer = 0
         self.dialog_npc = None
         self.dialog_speaker = ""
         self.dialog_color = CYAN
         self.dialog_lines = []
-        self.dialog_choice = 0
         self.dialog_queue = []
-        self.story_flags = set()
+        
         self.kill_count = 0
         self.saved_npcs = 0
         self.next_chapter_ready = False
-        self.last_objective_text = ""
-        self.objective_flash_until = 0
-        self.chapter_card_timer = 0
-        self.intro_index = 0
-        self.trailer_started_at = 0
-        self.end_reason = ""
         self.chapter_index = 0
-        self.last_hint_path = []
-        self.beacon_started_at = 0
-        self.holdout_until = 0
-        self.last_spawn_at = 0
-        self.stats_start = pygame.time.get_ticks()
         self.chapters = self.build_chapters()
         self.chapter = None
         self.mission = None
         self.story_enemies = []
         self.current_blocked = set()
-        self.power_boxes = []
-        self.gates = []
-        self.heli_zone = None
-        self.tank = EscortTank(120, 120)
+        self.stats_start = pygame.time.get_ticks()
+        
+        # World Bounds (Fixed map)
+        self.world_w = GRID_SIZE * TILE_SIZE
+        self.world_h = GRID_SIZE * TILE_SIZE
+        
+        # Particles
+        self.particles = []
+        
+        # UI & Animation
+        self.shop_anim_timer = 0
+        self.trailer_started_at = 0
+        self.chapter_card_timer = 0
+        self.last_objective_text = ""
+        self.objective_flash_until = 0
+        self.show_shop = False
+        
+        play_bg_music()
         self.set_chapter(0)
 
     def build_chapters(self):
@@ -520,6 +568,11 @@ class Game:
         office_items = [
             ItemPickup((8, 6), "Keycard", "The tu mo cua an ninh tang 3.", "keycard", color=BLUE),
             ItemPickup((35, 28), "Fuse", "Cau chi phu cho dien hanh lang.", "power", color=YELLOW),
+            ItemPickup((14, 20), "Katana", "Thanh kiem nhat gia: Sac lem va toc do cao.", "weapon", weapon_data={
+                "name": "Katana", "fire_rate": 2.5, "reload_time": 0.0,
+                "image_path": "Sprites/Sprites_Weapon/Sniper-rifle-1.png",
+                "projectile_speed": 0, "damage": 110, "projectile_scale": (48, 48), "type": "melee"
+            }),
             ItemPickup((24, 5), "Ammo", "Dan du tru tu phong nhan su.", "ammo", amount=18, color=WHITE),
         ]
         office_npcs = [
@@ -527,9 +580,9 @@ class Game:
         ]
         office_enemies = [
             (Goblin, (9, 17), "basic"),
-            (DashingGoblin, (24, 16), "fast"),
-            (FlyingEye, (33, 6), "fast"),
-            (Goblin, (35, 31), "basic"),
+            (EvilWizard, (24, 16), "ranged"),
+            (DashingGoblin, (33, 6), "fast"),
+            (EvilWizard, (35, 31), "ranged"),
             (Skeleton, (9, 29), "special"),
             (Goblin, (26, 31), "basic"),
             (DashingGoblin, (19, 6), "fast"),
@@ -557,6 +610,7 @@ class Game:
             (Goblin, (21, 31), "basic"),
             (FlyingEye, (6, 33), "fast"),
             (Mushroom, (17, 16), "tank"),
+            (EvilWizard, (32, 28), "ranged"),
             (Goblin, (30, 7), "basic"),
         ]
 
@@ -580,11 +634,10 @@ class Game:
         ]
         ground_enemies = [
             (Goblin, (18, 6), "basic"),
-            (DashingGoblin, (35, 9), "fast"),
+            (EvilWizard, (35, 9), "ranged"),
             (Mushroom, (28, 18), "tank"),
             (Skeleton, (6, 28), "special"),
-            (FlyingEye, (37, 24), "fast"),
-            # Boss to, máu 100
+            (EvilWizard, (37, 24), "ranged"),
             (BigFlyingEye, (33, 35), {"type": "boss", "health": 100}),
             (Goblin, (14, 27), "basic"),
             (DashingGoblin, (30, 31), "fast"),
@@ -593,10 +646,10 @@ class Game:
         return [
             Chapter(
                 "roof",
-                "Chương 1: Tầng thượng",
-                "Tỉnh dậy giữa tận thế",
-                ["Một vụ nổ rung chuyển tòa nhà.", "Bạn tỉnh dậy trên tầng thượng, bộ đàm chỉ còn tiếng nhiễu.", "Một trực thăng cứu hộ đang dò tín hiệu từ dưới sân."],
-                ["Nhặt súng", "Lấy băng gạc", "Hạ zombie đầu tiên", "Mở lối xuống tầng 3"],
+                "Chuong 1: Tang thuong",
+                "Tinh day giua tan the",
+                ["Mot vu no rung chuyen toa nha.", "Ban tinh day tren tang thuong, bo dam chi con tieng nhieu.", "Mot truc thang cuu ho dang do tin hieu tu duoi san."],
+                ["Nhat sung", "Lay bang gac", "Ha zombie dau tien", "Mo loi xuong tang 3"],
                 (38, 34),
                 (4, 5),
                 roof_blocked,
@@ -605,17 +658,17 @@ class Game:
                 roof_npcs,
                 roof_enemies,
                 ORANGE,
-                "Phi công: Nếu còn nghe thấy tôi, hãy xuống các tầng dưới và mở cổng sân.",
+                "Phi cong: Neu con nghe thay toi, hay xuong cac tang duoi va mo cong san.",
                 spawn_pool=[],
                 max_alive_enemies=5,
                 spawn_interval_ms=999999,
             ),
             Chapter(
                 "office",
-                "Chương 2: Tầng 3",
-                "Khu văn phòng cũ",
-                ["Điện hành lang chập chờn, văn phòng biến thành mê cung.", "Zombie bắt đầu di chuyển nhanh hơn trong không gian hẹp."],
-                ["Lấy thẻ từ", "Khôi phục điện", "Nói chuyện với bảo vệ", "Tới thang xuống tầng 2"],
+                "Chuong 2: Tang 3",
+                "Khu van phong cu",
+                ["Dien hanh lang chap chon, van phong bien thanh me cung.", "Zombie bat dau di chuyen nhanh hon trong khong gian hep."],
+                ["Lay the tu", "Khoi phuc dien", "Noi chuyen voi bao ve", "Toi thang xuong tang 2"],
                 (37, 35),
                 (3, 34),
                 office_blocked,
@@ -624,17 +677,17 @@ class Game:
                 office_npcs,
                 office_enemies,
                 BLUE,
-                "Bảo vệ Nam: Tôi thấy cầu thang kỹ thuật ở góc đông nam. Nhưng phải có điện.",
+                "Bao ve Nam: Toi thay cau thang ky thuat o goc dong nam. Nhung phai co dien.",
                 spawn_pool=[Goblin, DashingGoblin, FlyingEye],
                 max_alive_enemies=11,
                 spawn_interval_ms=3200,
             ),
             Chapter(
                 "medical",
-                "Chương 3: Tầng 2",
-                "Khu y tế và kho chứa",
-                ["Mùi hóa chất và máu trộn lẫn trong hành lang.", "Đây là nơi còn nhiều tiếp tế nhất, cũng là nơi nguy hiểm nhất."],
-                ["Lấy kho thuốc", "Diệt 3 zombie đặc biệt", "Giúp y tá", "Mở đường xuống tầng 1"],
+                "Chuong 3: Tang 2",
+                "Khu y te va kho chua",
+                ["Mui hoa chat va mau tron lan trong hanh lang.", "Day la noi con nhieu tiep te nhat, cung la noi nguy hiem nhat."],
+                ["Lay kho thuoc", "Diet 3 zombie dac biet", "Giup y ta", "Mo duong xuong tang 1"],
                 (39, 35),
                 (4, 34),
                 med_blocked,
@@ -643,57 +696,81 @@ class Game:
                 med_npcs,
                 med_enemies,
                 GREEN,
-                "Y tá Linh: Cổng tầng 1 chỉ mở nếu cấp điện đúng tuyến kỹ thuật.",
+                "Y ta Linh: Cong tang 1 chi mo neu cap dien dung tuyen ky thuat.",
                 spawn_pool=[Goblin, Mushroom, TeleportingMushroom, Skeleton],
                 max_alive_enemies=12,
                 spawn_interval_ms=3000,
             ),
             Chapter(
                 "ground",
-                "Chương 4: Tầng 1 và Sân",
-                "Cuộc tháo chạy cuối cùng",
-                ["Còi báo động rít lên. Cả tầng 1 bắt đầu đổ dồn zombie về phía sân.", "Bạn chỉ còn vài phút để mở cổng, kích hoạt tín hiệu và giữ vững vị trí."],
-                ["Mở cổng sân", "Bật beacon", "Giữ vị trí", "Hạ boss đột biến"],
-                (40, 37),
+                "Chuong 4: Tang 1 - Sanh chinh",
+                "Diem nghen cuoi cung ben trong toa nha",
+                ["Ban da xuong toi tang tret. Coi bao dong vang doi khap sanh.", "Zombie dang tran vao qua cac cua kinh vo.", "Phai mo duoc cong chinh de ra san sau."],
+                ["Mo cong chinh", "Ha 2 zombie dac biet", "Tim loi ra san"],
+                (38, 36),
                 (5, 5),
                 ground_blocked,
-                {(6, 6): "hut", (28, 18): "rock", (38, 36): "grass"},
+                {(6, 6): "hut", (24, 20): "rock", (10, 30): "grass"},
                 ground_items,
                 ground_npcs,
                 ground_enemies,
                 RED,
-                "Phi công: Khi beacon sáng, tôi cần cậu sống sót thêm một chút nữa.",
-                holdout_seconds=25,
+                "Ky thuat vien Huy: Cong chinh dang ket. Toi se mo tu xa, hay giu chan chung!",
+                spawn_pool=[Goblin, DashingGoblin, Skeleton],
+                max_alive_enemies=12,
+                spawn_interval_ms=2800,
+            ),
+            Chapter(
+                "escape",
+                "Chuong 5: San bay - Thoat hiem",
+                "Truc thang dang doi",
+                ["Bau troi ruc lua, truc thang cuu ho da o phia truoc.", "Hay bat den hieu beacon va tru vung cho den khi chung co the ha canh."],
+                ["Bat den hieu Beacon", "Tru vung trong 25 giay", "Ha boss Old Guardian", "Len truc thang"],
+                (40, 37),
+                (10, 10),
+                ring_walls(),
+                {(15, 15): "rock", (25, 25): "grass", (12, 30): "hut", (30, 12): "rock", (38, 36): "heli_pad"},
+                [ItemPickup((34, 29), "Rescue Flare", "Phao sang xac nhan vi tri.", "flare", color=RED)],
+                [],
+                [
+                    (BigFlyingEye, (33, 35), {"type": "boss", "health": 150}),
+                    (OldGuardian, (25, 25), {"type": "boss", "health": 1200}),
+                    (EvilWizard, (35, 10), "ranged"),
+                    (EvilWizard, (10, 35), "ranged"),
+                ],
+                YELLOW,
+                "Phi cong: Toi thay beacon roi! Dang ha do cao, hay quet sach khu vuc!",
+                holdout_seconds=30,
                 chapter_type="holdout",
-                spawn_pool=[Goblin, DashingGoblin, Skeleton, FlyingEye, Mushroom],
-                max_alive_enemies=14,
-                spawn_interval_ms=2600,
+                spawn_pool=[Goblin, DashingGoblin, Skeleton, EvilWizard, Mushroom],
+                max_alive_enemies=18,
+                spawn_interval_ms=1800,
             ),
         ]
 
     def trailer_scenes(self):
         return [
             {
-                "title": "Thành phố đã sụp đổ",
-                "subtitle": "Virus lạ biến cả khu trung tâm thành ổ zombie chỉ sau một đêm.",
+                "title": "Thanh pho da sup do",
+                "subtitle": "Virus la bien ca khu trung tam thanh o zombie chi sau mot dem.",
                 "accent": RED,
                 "art": [("player", 160, 360), ("eye", 590, 160), ("goblin", 770, 360)],
             },
             {
-                "title": "Tỉnh dậy trên tầng thượng",
-                "subtitle": "Bạn bị mắc kẹt giữa khói lửa, chỉ còn tiếng bộ đàm cứu hộ vọng lại.",
+                "title": "Tinh day tren tang thuong",
+                "subtitle": "Ban bi mac ket giua khoi lua, chi con tieng bo dam cuu ho vong lai.",
                 "accent": ORANGE,
                 "art": [("player", 220, 340), ("hut", 670, 340), ("eye", 760, 180)],
             },
             {
-                "title": "Xuống từng tầng, mở đường sống",
-                "subtitle": "Tìm súng, vật tư, chìa khóa và khôi phục điện để mở lối thoát.",
+                "title": "Xuong tung tang, mo duong song",
+                "subtitle": "Tim sung, vat tu, chia khoa va khoi phuc dien de mo loi thoat.",
                 "accent": BLUE,
                 "art": [("player", 170, 350), ("rocket", 540, 350), ("mortar", 760, 320)],
             },
             {
-                "title": "Trụ vững tới chuyến bay cuối",
-                "subtitle": "Ra sân, bật đèn hiệu và chống lại đợt zombie cuối cùng để thoát khỏi thành phố.",
+                "title": "Tru vung toi chuyen bay cuoi",
+                "subtitle": "Ra san, bat den hieu va chong lai dot zombie cuoi cung de thoat khoi thanh pho.",
                 "accent": YELLOW,
                 "art": [("player", 160, 360), ("mushroom", 620, 330), ("rocket", 800, 240)],
             },
@@ -733,7 +810,6 @@ class Game:
         for enemy_cls, grid_pos, archetype in self.chapter.enemy_plan:
             ex = grid_pos[0] * TILE_SIZE + TILE_SIZE // 2
             ey = grid_pos[1] * TILE_SIZE + TILE_SIZE // 2
-            # Nếu là boss cuối cùng và có dict health
             if isinstance(archetype, dict) and archetype.get("type") == "boss":
                 enemy = enemy_cls(ex, ey)
                 enemy.health = archetype.get("health", 100)
@@ -832,6 +908,7 @@ class Game:
             projectile_image=weapon_data.get("projectile_image", "Sprites/Sprites_Effect/Bullets/14.png"),
             projectile_scale=weapon_data.get("projectile_scale", (48, 48)),
             equip_on_add=equip_now,
+            melee=(weapon_data.get("type", "") == "melee")
         )
         if not added and equip_now:
             self.weapon_manager.select_weapon(weapon_data["name"])
@@ -857,6 +934,11 @@ class Game:
                 return
 
         weapon_data = dict(random.choice(WEAPON_DROP_POOL))
+        # Find the sprite surface for this weapon
+        wp_sprite = ALL_GRAPHICS_SURFACES.get(weapon_data["image_path"])
+        if wp_sprite:
+            wp_sprite = pygame.transform.scale(wp_sprite, (32, 24))
+
         self.chapter.items.append(
             ItemPickup(
                 (tile_x, tile_y),
@@ -865,6 +947,7 @@ class Game:
                 "weapon_drop",
                 color=ORANGE,
                 weapon_data=weapon_data,
+                sprite_surface=wp_sprite
             )
         )
 
@@ -887,7 +970,7 @@ class Game:
                 equip_now=True,
             )
             self.popup = "Da nhat Shotgun. Da chuyen sang sung moi."
-            self.queue_story_lines("Nhân vật chính", ["Được rồi, có thêm hỏa lực rồi.", "Giết 1 zombie nữa là xong màn khởi động."], ORANGE)
+            self.queue_story_lines("Nhan vat chinh", ["Duoc roi, co them hoa luc roi.", "Giet 1 zombie nua la xong man khoi dong."], ORANGE)
         elif item.item_type == "heal":
             self.player.heal(item.amount)
             self.mission.data["medkit_collected"] = True
@@ -916,7 +999,7 @@ class Game:
                 equip_now=True,
             )
             self.popup = "Da mo khoa Rocket Launcher va chuyen sang vu khi moi."
-            self.queue_story_lines("Y tá Linh", ["Phia duoi dang co dam dong rat lon.", "Lay vu khi no nay, no se giup cau mo duong."], GREEN)
+            self.queue_story_lines("Y ta Linh", ["Phia duoi dang co dam dong rat lon.", "Lay vu khi no nay, no se giup cau mo duong."], GREEN)
         elif item.item_type == "weapon_drop":
             weapon_data = item.weapon_data or dict(random.choice(WEAPON_DROP_POOL))
             was_new = self.unlock_weapon(weapon_data, equip_now=True)
@@ -1003,42 +1086,57 @@ class Game:
             self.popup_timer = pygame.time.get_ticks() + 2600
 
     def update(self):
-        if self.state != "playing":
+        if self.state == "menu":
             return
-        keys = pygame.key.get_pressed()
-        # Map vô hạn: không giới hạn MAP_WIDTH, MAP_HEIGHT
-        self.player.update(keys, self.current_blocked, None, None, TILE_SIZE)
-        self.update_enemies()
-        self.spawn_dynamic_enemies_infinite()
-        if self.chapter.id == "ground" and self.mission.data["gate_opened"]:
-            self.tank.set_target(self.player.x - 40, self.player.y + 35)
-        self.tank.update()
-        mouse_x, mouse_y = pygame.mouse.get_pos()
-        shot_fired = self.weapon_manager.update(
-            self.player.x,
-            self.player.y,
-            mouse_x,
-            mouse_y,
-            self.mouse_down and mouse_x < SCREEN_WIDTH - SIDEBAR_WIDTH,
-            [entry.enemy for entry in self.story_enemies],
-        )
-        # Update kỹ năng
-        self.skill_manager.update()
-        self.update_frenzy(shot_fired)
-        self.handle_progression()
-        self.update_hint_path()
-        # Spawn item ngẫu nhiên trên map lớn
-        import random
-        if hasattr(self, "chapter") and self.chapter and random.random() < 0.002:
-            gx = random.randint(-100, 100)
-            gy = random.randint(-100, 100)
-            if not any(item.grid_pos == (gx, gy) for item in self.chapter.items):
-                self.chapter.items.append(ItemPickup((gx, gy), "Random Item", "Vat pham ngau nhien", "heal", amount=10, color=YELLOW))
-        if self.player.health <= 0:
-            self.end_reason = "Ban da bi zombie ap dao truoc khi thoat duoc khoi thanh pho."
-            self.state = "lose"
+        if self.state == "pause":
+            return
+        if self.state == "playing":
+            if self.show_shop:
+                return
 
-    def spawn_dynamic_enemies_infinite(self):
+            keys = pygame.key.get_pressed()
+            self.player.update(keys, self.current_blocked, None, None, TILE_SIZE)
+            self.player.x = max(TILE_SIZE, min(self.player.x, self.world_w - TILE_SIZE))
+            self.player.y = max(TILE_SIZE, min(self.player.y, self.world_h - TILE_SIZE))
+            
+            self.camera.update(self.player.x, self.player.y, self.world_w, self.world_h)
+            
+            self.update_enemies()
+            self.spawn_dynamic_enemies()
+            
+            if self.chapter.id == "ground" and self.mission.data["gate_opened"]:
+                self.tank.set_target(self.player.x - 40, self.player.y + 35)
+            self.tank.update()
+            
+            mx, my = pygame.mouse.get_pos()
+            world_mx, world_my = self.camera.screen_to_world(mx, my)
+            
+            shot_fired = self.weapon_manager.update(
+                self.player.x,
+                self.player.y,
+                world_mx,
+                world_my,
+                self.mouse_down and mx < SCREEN_WIDTH - SIDEBAR_WIDTH,
+                [entry.enemy for entry in self.story_enemies],
+                self.current_blocked
+            )
+            
+            self.skill_manager.update([entry.enemy for entry in self.story_enemies], self.current_blocked)
+            self.update_particles()
+            self.handle_progression()
+            self.update_hint_path()
+            
+            if self.chapter.id == "escape" and hasattr(self, 'rescue_arrived') and self.rescue_arrived:
+                # Kiem tra xem nguoi choi da den Helipad chua
+                dist_to_extract = math.hypot(self.player.x - 38*TILE_SIZE, self.player.y - 36*TILE_SIZE)
+                if dist_to_extract < 64:
+                    self.state = "win"
+
+            if self.player.health <= 0:
+                self.end_reason = "Ban da bi zombie ap dao truoc khi thoat duoc khoi thanh pho."
+                self.state = "lose"
+
+    def spawn_dynamic_enemies(self):
         import random
         now = pygame.time.get_ticks()
         alive = [entry for entry in self.story_enemies if not entry.enemy.is_dead]
@@ -1135,32 +1233,80 @@ class Game:
     def handle_progression(self):
         if self.chapter.id == "roof" and self.mission.data["zombies_killed"] >= 1 and "roof_first_kill" not in self.story_flags:
             self.story_flags.add("roof_first_kill")
-            self.queue_story_lines("Nhân vật chính", ["Con đầu tiên đã gục.", "Mình phải lấy đồ rồi mở lối xuống ngay."], ORANGE)
+            self.queue_story_lines("Nhan vat chinh", ["Con dau tien da guc.", "Minh phai lay do roi mo loi xuong ngay."], ORANGE)
         if self.chapter.id == "roof" and self.mission.data["weapon_collected"] and self.mission.data["zombies_killed"] >= 1:
             self.mission.data["medkit_collected"] = True
             self.mission.data["power_restored"] = True
         if self.chapter.id == "office" and self.mission.data["power_restored"] and "office_power" not in self.story_flags:
             self.story_flags.add("office_power")
-            self.queue_story_lines("Bảo vệ Nam", ["Điện đã lên. Camera cho thấy cầu thang kỹ thuật đã mở.", "Đi nhanh lên, chúng đang áp sát từ hành lang sau."], BLUE)
+            self.queue_story_lines("Bao ve Nam", ["Dien da len. Camera cho thay cau thang ky thuat da mo.", "Di nhanh len, chung dang ap sat tu hanh lang sau."], BLUE)
         if self.chapter.id == "medical" and self.mission.data["special_kills"] >= 2 and "medical_warning" not in self.story_flags:
             self.story_flags.add("medical_warning")
-            self.queue_story_lines("Y tá Linh", ["Có loại đột biến đang đi trong kho.", "Đừng đối mặt quá lâu, nó rất trâu."], GREEN)
+            self.queue_story_lines("Y ta Linh", ["Co loai dot bien dang di trong kho.", "Dung doi mat qua lau, no rat trau."], GREEN)
         if self.chapter.id == "medical" and self.mission.data["special_kills"] >= 3:
             self.mission.data["specials_cleared"] = True
         if self.chapter.id == "ground" and self.mission.data["signal_started"] and pygame.time.get_ticks() >= self.holdout_until:
             self.mission.data["holdout_complete"] = True
         if self.chapter.id == "ground" and self.mission.data["signal_started"] and "ground_hold" not in self.story_flags:
             self.story_flags.add("ground_hold")
-            self.queue_story_lines("Phi công", ["Tôi đang hạ độ cao.", "Đừng để boss đột biến áp sát beacon."], YELLOW)
-        if self.mission.complete() and not self.next_chapter_ready:
+            self.queue_story_lines("Phi cong", ["Toi dang ha do cao.", "Dung de boss dot bien ap sat beacon."], YELLOW)
+            
+        if self.chapter.id == "escape" and self.mission.data["boss_down"]:
+            if not getattr(self, "countdown_started", False):
+                self.countdown_started = True
+                self.holdout_until = pygame.time.get_ticks() + 60 * 1000  # 1 phút
+                self.queue_story_lines("Phi cong", ["Da xac nhan muc tieu nguy hiem bi ha.", "Dang bay toi vi tri. Giu vung trong 1 phut!"], YELLOW)
+
+            if getattr(self, "countdown_started", False) and pygame.time.get_ticks() >= self.holdout_until and not getattr(self, "rescue_arrived", False):
+                self.rescue_arrived = True
+                self.mission.data["helicopter_arrived"] = True
+                self.queue_story_lines("Phi cong", ["Truc thang da ha canh! Len nhanh nao!"], YELLOW)
+
+        if self.mission.complete() or (self.chapter.id == "escape" and getattr(self, "rescue_arrived", False)) and not self.next_chapter_ready:
             self.next_chapter_ready = True
             if self.chapter.id == "roof":
-                self.popup = "Hoàn thành màn khởi động. Nhấn ENTER để bắt đầu Chương 2."
+                self.popup = "Hoan thanh man khoi dong. Nhan ENTER de bat dau Chuong 2."
+            if self.chapter.id == "escape":
+                self.popup = "CHO TRUC THANG HA CANH... CHAY DEN DIEM EXTRACT!"
+                self.rescue_arrived = True # Flag for win condition at Helipad
             elif self.chapter_index == len(self.chapters) - 1:
-                self.popup = "Đã hoàn thành nhiệm vụ cuối. Nhấn ENTER để lên trực thăng."
+                self.popup = "Da hoan thanh nhiem vu cuoi. Nhan ENTER de len truc thang."
             else:
-                self.popup = "Đã hoàn thành màn chơi. Nhấn ENTER để sang màn tiếp theo."
+                self.popup = "Da hoan thanh man choi. Nhan ENTER de sang man tiep theo."
             self.popup_timer = pygame.time.get_ticks() + 4000
+
+    def spawn_particles(self, x, y, color, count=5):
+        for _ in range(count):
+            self.particles.append(Particle(
+                x, y,
+                random.uniform(-3, 3), random.uniform(-3, 3),
+                random.randint(15, 30),
+                color,
+                random.randint(2, 4)
+            ))
+
+    def update_particles(self):
+        for p in self.particles:
+            p.x += p.dx
+            p.y += p.dy
+            p.life -= 1
+        self.particles = [p for p in self.particles if p.life > 0]
+
+    def draw_shadow(self, surface, x, y, width=44, height=18):
+        # Ve bong do don gian
+        shadow_surf = pygame.Surface((width, height), pygame.SRCALPHA)
+        pygame.draw.ellipse(shadow_surf, (0, 0, 0, 80), (0, 0, width, height))
+        surface.blit(shadow_surf, (x - width // 2, y - height // 2))
+
+    def build_obstacle_grid(self):
+        """Trả về tập hợp các ô bị chặn trong bán kính gần người chơi để AI tìm đường hiệu quả."""
+        px, py = int(self.player.x // TILE_SIZE), int(self.player.y // TILE_SIZE)
+        radius = 40 
+        local_blocked = set()
+        for bx, by in self.current_blocked:
+            if abs(bx - px) <= radius and abs(by - py) <= radius:
+                local_blocked.add((bx, by))
+        return local_blocked
 
     def build_danger_map(self):
         danger_map = {}
@@ -1206,31 +1352,31 @@ class Game:
         cid = self.chapter.id
         if cid == "roof":
             if not self.mission.data["weapon_collected"]:
-                return "Nhặt súng"
+                return "Nhat sung"
             if self.mission.data["zombies_killed"] < 1:
-                return "Hạ 1 zombie để hoàn tất màn khởi động"
-            return "Nhấn ENTER để vào màn 2"
+                return "Ha 1 zombie de hoan tat man khoi dong"
+            return "Nhan ENTER de vao man 2"
         if cid == "office":
             if not self.mission.data["keycard_collected"]:
-                return "Tìm thẻ từ"
+                return "Tim the tu"
             if not self.mission.data["npc_saved"]:
-                return "Nói chuyện với bảo vệ"
+                return "Noi chuyen voi bao ve"
             if not self.mission.data["power_restored"]:
-                return "Khôi phục điện"
-            return "Đi tới cầu thang xuống tầng 2"
+                return "Khoi phuc dien"
+            return "Di toi cau thang xuong tang 2"
         if cid == "medical":
             if not self.mission.data["npc_saved"]:
-                return "Nói chuyện với y tá Linh"
+                return "Noi chuyen voi y ta Linh"
             if not self.mission.data["supply_cache"]:
-                return "Lấy vật tư y tế"
+                return "Lay vat tu y te"
             if not self.mission.data["gate_opened"]:
-                return "Mở lối xuống tầng 1"
-            return "Đi xuống tầng 1"
+                return "Mo loi xuong tang 1"
+            return "Di xuong tang 1"
         if not self.mission.data["gate_opened"]:
-            return "Mở cổng ra sân"
+            return "Mo cong chính"
         if not self.mission.data["signal_started"]:
-            return "Kích hoạt đèn hiệu"
-        return "Ra điểm trực thăng"
+            return "Kích hoạt beacon"
+        return "Ra diem truc thang"
 
     def auto_select_hint_mode(self):
         cid = self.chapter.id
@@ -1283,6 +1429,21 @@ class Game:
         else:
             self.last_hint_path = a_star(start, goal, GRID_SIZE, GRID_SIZE, blocked, danger)
 
+    def draw_path_overlay(self, surface):
+        if not self.last_hint_path: return
+        mode = self.hint_modes[self.hint_mode_index]
+        color = CYAN if mode == "A*" else GREEN if mode == "BFS" else RED if mode == "DFS" else YELLOW
+        points = []
+        for x, y in self.last_hint_path:
+            sx, sy = self.camera.world_to_screen(x * TILE_SIZE + 8, y * TILE_SIZE + 8)
+            points.append((sx, sy))
+        if len(points) > 1:
+            pygame.draw.lines(surface, color, False, points, 3)
+            # Draw node pulses for clarity
+            for i, p in enumerate(points):
+                if i % 3 == 0:
+                    pygame.draw.circle(surface, color, p, 3)
+
     def draw(self):
         screen.fill(BLACK)
         if self.state == "menu":
@@ -1302,134 +1463,155 @@ class Game:
         pygame.display.flip()
 
     def draw_world(self):
-        world_surface = pygame.Surface((MAP_WIDTH, MAP_HEIGHT), pygame.SRCALPHA)
-        self.render_world(world_surface)
-        # Vẽ hiệu ứng kỹ năng lên world_surface
-        self.skill_manager.draw(world_surface)
-        screen.blit(world_surface, (0, 0))
+        # We don't use a separate world_surface for infinite map because it's too large
+        self.render_world(screen)
+        self.draw_path_overlay(screen)
+        # Vẽ hiệu ứng kỹ năng
+        self.skill_manager.draw(screen, self.camera)
 
     def render_world(self, surface):
+        # Get visible tile range from camera
+        min_tx, max_tx, min_ty, max_ty = self.camera.get_visible_tile_range(TILE_SIZE)
+        
+        # 1. Background Backdrop
         self.draw_chapter_backdrop(surface)
-        for y in range(GRID_SIZE):
-            for x in range(GRID_SIZE):
-                base_tile = DESERT_TILE_ALT if (x * 3 + y * 5) % 11 == 0 else DESERT_TILE
-                surface.blit(base_tile, (x * TILE_SIZE, y * TILE_SIZE))
-                if (x + y) % 9 == 0:
-                    surface.blit(DESERT_GRASS, (x * TILE_SIZE, y * TILE_SIZE))
-                elif (x * 7 + y * 3) % 19 == 0:
-                    surface.blit(DESERT_GRASS_TUFT, (x * TILE_SIZE, y * TILE_SIZE))
-        for (x, y), decor in self.chapter.decor_tiles.items():
-            if decor == "rock":
-                surface.blit(DESERT_ROCK, (x * TILE_SIZE, y * TILE_SIZE))
-            elif decor == "hut":
-                surface.blit(DESERT_HUT, (x * TILE_SIZE - 18, y * TILE_SIZE - 18))
-            else:
-                surface.blit(DESERT_GRASS, (x * TILE_SIZE, y * TILE_SIZE))
-        for x in range(3, GRID_SIZE, 10):
-            y = ((x * 7) + 9) % (GRID_SIZE - 6) + 2
-            surface.blit(DESERT_BIG_GRASS, (x * TILE_SIZE - 10, y * TILE_SIZE - 10))
-        for x in range(6, GRID_SIZE, 13):
-            y = ((x * 5) + 13) % (GRID_SIZE - 6) + 2
-            surface.blit(DESERT_BIG_ROCK, (x * TILE_SIZE - 14, y * TILE_SIZE - 14))
-        self.draw_world_props(surface)
-        for x, y in self.current_blocked:
-            pygame.draw.rect(surface, (78, 63, 55), (x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE))
-        if self.last_hint_path:
-            color = {"BFS": BLUE, "DFS": CYAN, "SAFE": GREEN, "A*": YELLOW}[self.hint_modes[self.hint_mode_index]]
-            for tile in self.last_hint_path:
-                px = tile[0] * TILE_SIZE + TILE_SIZE // 2
-                py = tile[1] * TILE_SIZE + TILE_SIZE // 2
-                pygame.draw.circle(surface, color, (px, py), 3)
+        
+        # 2. Tiles
+        for ty in range(min_ty, max_ty + 1):
+            for tx in range(min_tx, max_tx + 1):
+                base_tile = DESERT_TILE_ALT if (tx * 3 + ty * 5) % 11 == 0 else DESERT_TILE
+                sx, sy = self.camera.world_to_screen(tx * TILE_SIZE, ty * TILE_SIZE)
+                surface.blit(base_tile, (sx, sy))
+                
+                # Vẽ bức tường (vật cản)
+                if (tx, ty) in self.current_blocked:
+                    # Sử dụng sprite gạch đá tông tối để trông chuyên nghiệp hơn
+                    surface.blit(DESERT_WALL, (sx, sy))
+                    pygame.draw.rect(surface, (20, 20, 30), (sx, sy, TILE_SIZE, TILE_SIZE), 1)
+                elif (tx + ty) % 9 == 0:
+                    surface.blit(DESERT_GRASS, (sx, sy))
+                elif (tx * 7 + ty * 3) % 19 == 0:
+                    surface.blit(DESERT_GRASS_TUFT, (sx, sy))
+                
+                # Ve vat trang tri Chapter
+                prop = self.chapter.decor_tiles.get((tx, ty))
+                if prop:
+                    if prop == "hut": surface.blit(DESERT_HUT, (sx, sy - 32))
+                    elif prop == "rock": surface.blit(DESERT_BIG_ROCK, (sx, sy))
+                    elif prop == "grass": surface.blit(DESERT_BIG_GRASS, (sx, sy))
+                    elif prop == "heli_pad" and hasattr(self, 'rescue_arrived') and self.rescue_arrived:
+                        # Draw Heli-pad and Rescue Helidrop
+                        pygame.draw.rect(surface, YELLOW, (sx-32, sy-32, 96, 96), 3)
+                        screen.blit(HELICOPTER, (sx-75, sy-75))
+                    
         for item in self.chapter.items:
-            if item.collected:
-                continue
-            if item.item_type == "rocket_weapon":
-                icon_rect = ROCKET_PICKUP.get_rect(center=(item.grid_pos[0] * TILE_SIZE + TILE_SIZE // 2, item.grid_pos[1] * TILE_SIZE + TILE_SIZE // 2))
-                surface.blit(ROCKET_PICKUP, icon_rect)
-                pygame.draw.circle(surface, ORANGE, icon_rect.center, 14, 2)
-            elif item.item_type == "weapon":
-                icon_rect = SHOTGUN_PICKUP.get_rect(center=(item.grid_pos[0] * TILE_SIZE + TILE_SIZE // 2, item.grid_pos[1] * TILE_SIZE + TILE_SIZE // 2))
-                surface.blit(SHOTGUN_PICKUP, icon_rect)
-                pulse = 16 + int(abs(math.sin(pygame.time.get_ticks() * 0.01)) * 6)
-                pygame.draw.circle(surface, ORANGE, icon_rect.center, pulse, 2)
-            elif item.item_type == "weapon_drop":
-                drop_name = (item.weapon_data or {}).get("name", "")
-                if "sniper" in drop_name.lower():
-                    icon = SNIPER_PICKUP
-                elif "smg" in drop_name.lower():
-                    icon = SMG_PICKUP
+            if item.collected: continue
+            if self.camera.is_visible(item.grid_pos[0]*TILE_SIZE, item.grid_pos[1]*TILE_SIZE):
+                sx, sy = self.camera.world_to_screen(item.grid_pos[0]*TILE_SIZE, item.grid_pos[1]*TILE_SIZE)
+                if item.sprite_surface:
+                    surface.blit(item.sprite_surface, (sx, sy))
                 else:
-                    icon = AK_PICKUP
-                icon_rect = icon.get_rect(center=(item.grid_pos[0] * TILE_SIZE + TILE_SIZE // 2, item.grid_pos[1] * TILE_SIZE + TILE_SIZE // 2))
-                surface.blit(icon, icon_rect)
-                pulse = 12 + int(abs(math.sin(pygame.time.get_ticks() * 0.012)) * 5)
-                pygame.draw.circle(surface, ORANGE, icon_rect.center, pulse, 2)
-            else:
-                rect = pygame.Rect(item.grid_pos[0] * TILE_SIZE + 2, item.grid_pos[1] * TILE_SIZE + 2, TILE_SIZE - 4, TILE_SIZE - 4)
-                pygame.draw.rect(surface, item.color, rect, border_radius=4)
+                    # Fallback if no sprite
+                    sprite = ITEM_SURFACES.get(item.item_type)
+                    if sprite:
+                        surface.blit(sprite, (sx, sy))
+                    else:
+                        pygame.draw.circle(surface, item.color, (sx+8, sy+8), 6)
+                    
         for npc in self.chapter.npcs:
-            color = GRAY if npc.interacted else npc.color
-            center = (npc.grid_pos[0] * TILE_SIZE + TILE_SIZE // 2, npc.grid_pos[1] * TILE_SIZE + TILE_SIZE // 2)
-            pygame.draw.circle(surface, color, center, 7)
-            pygame.draw.circle(surface, WHITE, center, 7, 1)
-        if self.chapter.id == "ground":
-            self.tank.draw(surface)
-        self.draw_pet_companion(surface)
-        self.player.draw(surface)
-        self.weapon_manager.draw(surface)
+            if self.camera.is_visible(npc.grid_pos[0]*TILE_SIZE, npc.grid_pos[1]*TILE_SIZE):
+                sx, sy = self.camera.world_to_screen(npc.grid_pos[0]*TILE_SIZE + 8, npc.grid_pos[1]*TILE_SIZE + 8)
+                color = GRAY if npc.interacted else npc.color
+                pygame.draw.circle(surface, color, (sx, sy), 7)
+                pygame.draw.circle(surface, WHITE, (sx, sy), 7, 1)
+
         for entry in self.story_enemies:
-            entry.enemy.draw(surface)
+            if self.camera.is_visible(entry.enemy.x, entry.enemy.y):
+                sx, sy = self.camera.world_to_screen(entry.enemy.x, entry.enemy.y)
+                self.draw_shadow(surface, sx, sy + 20)
+                sprite = entry.enemy.frames[entry.enemy.current_action][entry.enemy.current_frame]
+                if not entry.enemy.look_right:
+                    sprite = pygame.transform.flip(sprite, True, False)
+                rect = sprite.get_rect(center=(sx, sy))
+                surface.blit(sprite, rect.topleft)
+
+        self.draw_pet_companion(surface)
+        psx, psy = self.camera.world_to_screen(self.player.x, self.player.y)
+        self.draw_shadow(surface, psx, psy + 24, width=48)
+        self.weapon_manager.draw(surface, self.camera)
+        
+        sprite = self.player.frames[self.player.direction][self.player.current_frame]
+        rect = sprite.get_rect(center=(psx, psy))
+        surface.blit(sprite, rect.topleft)
+        
+        # Draw Particles
+        for p in self.particles:
+            sx, sy = self.camera.world_to_screen(p.x, p.y)
+            pygame.draw.circle(surface, p.color, (sx, sy), p.size)
+        
+        # 5. Objective Marker
         goal = self.objective_tile()
         if goal:
-            center = (goal[0] * TILE_SIZE + TILE_SIZE // 2, goal[1] * TILE_SIZE + TILE_SIZE // 2)
-            pulse = 8 + int(abs(math.sin(pygame.time.get_ticks() * 0.01)) * 6)
-            pygame.draw.circle(surface, YELLOW, center, pulse, 2)
-            pygame.draw.circle(surface, WHITE, center, 4)
-        if self.chapter.exit_pos:
-            exit_rect = pygame.Rect(self.chapter.exit_pos[0] * TILE_SIZE, self.chapter.exit_pos[1] * TILE_SIZE, TILE_SIZE, TILE_SIZE)
-            pygame.draw.rect(surface, self.chapter.chapter_color, exit_rect, 2)
+            gsx, gsy = self.camera.world_to_screen(goal[0]*TILE_SIZE + 8, goal[1]*TILE_SIZE + 8)
+            pulse = 10 + int(abs(math.sin(pygame.time.get_ticks() * 0.01)) * 8)
+            pygame.draw.circle(surface, YELLOW, (gsx, gsy), pulse, 2)
+            pygame.draw.circle(surface, WHITE, (gsx, gsy), 4)
+            
         self.draw_world_fx(surface)
 
     def draw_world_props(self, surface):
-        prop_sets = {
-            "roof": [(BUILD_ROCKET, 32, 6), (BUILD_MORTAR, 35, 34)],
-            "office": [(BUILD_CANNON, 6, 30), (BUILD_ROCKET, 33, 5)],
-            "medical": [(BUILD_MORTAR, 28, 27), (BUILD_CANNON, 8, 17)],
-            "ground": [(BUILD_ROCKET, 36, 8), (BUILD_MORTAR, 12, 34), (BUILD_CANNON, 30, 30)],
-        }
-        for sprite, gx, gy in prop_sets.get(self.chapter.id, []):
-            surface.blit(sprite, (gx * TILE_SIZE - 18, gy * TILE_SIZE - 18))
+        pass
 
     def draw_pet_companion(self, surface):
         now = pygame.time.get_ticks()
-        orbit_x = int(self.player.x - 34 + math.sin(now * 0.004) * 18)
-        orbit_y = int(self.player.y + 22 + math.cos(now * 0.003) * 12)
-        pet = self.current_pet
-        surface.blit(pet, pet.get_rect(center=(orbit_x, orbit_y)))
-        surface.blit(PET_POWER, PET_POWER.get_rect(center=(orbit_x + 10, orbit_y - 12)))
+        orbit_x = self.player.x - 34 + math.sin(now * 0.004) * 18
+        orbit_y = self.player.y + 22 + math.cos(now * 0.003) * 12
+        sx, sy = self.camera.world_to_screen(orbit_x, orbit_y)
+        surface.blit(self.current_pet, self.current_pet.get_rect(center=(sx, sy)))
+        # Enhanced orbital effect
+        for i in range(3):
+            ang = now * 0.005 + i * 2.09
+            px = sx + math.cos(ang) * 15
+            py = sy + math.sin(ang) * 15
+            pygame.draw.circle(screen, (200, 220, 255, 100), (int(px), int(py)), 3)
 
     def draw_chapter_backdrop(self, surface):
         top = self.chapter.chapter_color
-        for y in range(MAP_HEIGHT):
-            blend = y / max(1, MAP_HEIGHT - 1)
-            color = (
-                int(8 + top[0] * 0.08 + 20 * blend),
-                int(10 + top[1] * 0.05 + 14 * blend),
-                int(14 + top[2] * 0.04 + 10 * blend),
-            )
-            pygame.draw.line(surface, color, (0, y), (MAP_WIDTH, y))
+        for y in range(0, SCREEN_HEIGHT, 8):
+            blend = y / SCREEN_HEIGHT
+            c = [max(10, int(top[i] * 0.12 * (1-blend) + 15 * blend)) for i in range(3)]
+            pygame.draw.rect(surface, tuple(c), (0, y, MAP_WIDTH, 8))
+
+    def generate_chunk_walls(self, cx, cy):
+        import random
+        # Seed cố định dựa trên tọa độ chunk để map luôn nhất quán
+        rng = random.Random(cx * 1000003 + cy * 999983 + 42)
+        walls = set()
+        # 40% khả năng có một bức tường rào trong chunk này
+        if rng.random() < 0.4:
+            is_horiz = rng.random() < 0.5
+            start_x = cx * 20
+            start_y = cy * 20
+            # Vị trí khe hở (gap) để người chơi có thể đi qua
+            gap_pos = rng.randint(2, 17)
+            
+            for i in range(20):
+                # Để lại khe hở 2 ô
+                if i in (gap_pos, gap_pos + 1): 
+                    continue
+                if is_horiz:
+                    walls.add((start_x + i, start_y + 10))
+                else:
+                    walls.add((start_x + 10, start_y + i))
+        return walls
 
     def draw_world_fx(self, surface):
+        # Particles or weather effects
         now = pygame.time.get_ticks()
-        for i in range(6):
-            px = int((now * (0.02 + i * 0.003) + i * 120) % MAP_WIDTH)
-            py = int((50 + i * 90 + math.sin(now * 0.002 + i) * 18))
-            pygame.draw.circle(surface, (255, 210, 130, 35), (px, py), 12)
-        if self.chapter.id == "ground":
-            alpha = 70 + int(abs(math.sin(now * 0.01)) * 80)
-            overlay = pygame.Surface((MAP_WIDTH, MAP_HEIGHT), pygame.SRCALPHA)
-            overlay.fill((120, 8, 8, alpha))
-            surface.blit(overlay, (0, 0))
+        for i in range(12):
+            px = (now * (0.05 + i*0.01) + i * 200) % MAP_WIDTH
+            py = (i * 100 + math.sin(now*0.002 + i)*30) % SCREEN_HEIGHT
+            pygame.draw.circle(surface, (255, 255, 255, 20), (int(px), int(py)), 2)
 
     def draw_sidebar(self):
         panel_rect = pygame.Rect(MAP_WIDTH, 0, SIDEBAR_WIDTH, SCREEN_HEIGHT)
@@ -1546,6 +1728,14 @@ class Game:
             screen.blit(self.font_small.render(title, True, SOFT), (flash_rect.x + 14, flash_rect.y + 10))
             for i, line in enumerate(wrap_text(self.objective_label(), self.font, flash_rect.width - 28)[:2]):
                 screen.blit(self.font.render(line, True, WHITE), (flash_rect.x + 14, flash_rect.y + 24 + i * 18))
+        if self.chapter.id == "escape" and getattr(self, "countdown_started", False) and not getattr(self, "rescue_arrived", False):
+            time_left = max(0, (self.holdout_until - pygame.time.get_ticks()) // 1000)
+            mins = time_left // 60
+            secs = time_left % 60
+            timer_str = f"Trực thăng đến sau: {mins:02d}:{secs:02d}"
+            timer_rect = pygame.Rect(MAP_WIDTH // 2 - 140, 24, 280, 50)
+            self.draw_card(timer_rect, YELLOW)
+            screen.blit(self.font_big.render(timer_str, True, YELLOW), (timer_rect.x + 16, timer_rect.y + 12))
         if pygame.time.get_ticks() < self.chapter_card_timer:
             card_rect = pygame.Rect(116, 72, 500, 132)
             self.draw_card(card_rect, self.chapter.chapter_color)
@@ -1634,17 +1824,17 @@ class Game:
         screen.blit(self.font_title.render("LAST ROOF", True, WHITE), (120, 110))
         screen.blit(self.font_big.render("Escape City", True, ORANGE), (124, 164))
         menu_lines = [
-            "ENTER  Xem trailer & bắt đầu",
+            "ENTER  Xem trailer & bat dau",
             "H      How To Play",
-            "ESC    Quit",
+            "ESC    Thoat",
         ]
         y = 280
         for line in menu_lines:
             screen.blit(self.font_big.render(line, True, WHITE), (126, y))
             y += 44
         teaser = [
-            "Sinh tồn 2D theo chương, có NPC và hệ gợi ý đường đi.",
-            "Bấm TAB trong game để đổi BFS / DFS / SAFE / A*.",
+            "Sinh ton 2D theo chuong, co NPC va he goi y duong di.",
+            "Bam TAB trong game de doi BFS / DFS / SAFE / A*.",
         ]
         y = 500
         for line in teaser:
@@ -1655,14 +1845,15 @@ class Game:
             pygame.draw.rect(screen, PANEL, help_rect)
             pygame.draw.rect(screen, CYAN, help_rect, 2)
             lines = [
-                "WASD: Di chuyển",
-                "E: Tương tác / nhặt đồ",
-                "Q / Lăn chuột: Đổi súng",
-                "1-2-3: Chọn nhanh súng",
-                "TAB: Đổi thuật toán tìm đường",
-                "M: Mở minimap lớn",
-                "ESC: Pause",
-                "Mục tiêu mỗi chương ở bảng bên phải",
+                "WASD: Di chuyen",
+                "E: Tuong tac / nhat do",
+                "Q / Lan chuot: Doi sung",
+                "1-2-3: Chon nhanh sung",
+                "B: Mo shop vat pham",
+                "TAB: Doi thuat toan tim duong",
+                "M: Mo minimap lon",
+                "ESC: Tam dung",
+                "Muc tieu moi chuong o bang ben phai",
             ]
             yy = help_rect.y + 26
             for line in lines:
@@ -1682,8 +1873,8 @@ class Game:
         pygame.draw.rect(screen, (32, 36, 46), (90, 612, progress_width, 8), border_radius=4)
         fill = int(progress_width * min(1, elapsed / (scene_duration * len(scenes))))
         pygame.draw.rect(screen, scene["accent"], (90, 612, fill, 8), border_radius=4)
-        screen.blit(self.font.render("ENTER để bỏ qua trailer", True, WHITE), (90, 580))
-        screen.blit(self.font.render(f"Cảnh {scene_index + 1}/{len(scenes)}", True, WHITE), (470, 606))
+        screen.blit(self.font.render("ENTER de bo qua trailer", True, WHITE), (90, 580))
+        screen.blit(self.font.render(f"Canh {scene_index + 1}/{len(scenes)}", True, WHITE), (470, 606))
 
         if elapsed >= scene_duration * len(scenes):
             self.state = "playing"
@@ -1721,6 +1912,7 @@ class Game:
             yy += 34
 
     def draw_trailer_art(self, key, x, y):
+        """Draw specific art assets for the trailer sequence."""
         if key == "player":
             screen.blit(PLAYER_TRAILER, PLAYER_TRAILER.get_rect(center=(x, y)))
         elif key == "goblin":
@@ -1734,169 +1926,210 @@ class Game:
             screen.blit(rocket, rocket.get_rect(center=(x, y)))
         elif key == "mortar":
             screen.blit(MORTAR_TRAILER, MORTAR_TRAILER.get_rect(center=(x, y)))
-        elif key == "hut":
-            screen.blit(DESERT_HUT, DESERT_HUT.get_rect(center=(x, y)))
 
     def draw_pause(self):
         overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
-        overlay.fill(OVERLAY)
+        overlay.fill((10, 8, 12, 180))
         screen.blit(overlay, (0, 0))
         screen.blit(self.font_title.render("PAUSE", True, WHITE), (180, 160))
-        lines = [
-            "ESC de tiep tuc",
-            "M de mo minimap",
-            "TAB de doi thuat toan tim duong",
-        ]
-        y = 260
-        for line in lines:
-            screen.blit(self.font_big.render(line, True, WHITE), (160, y))
-            y += 44
+        lines = ["ESC de tiep tuc", "B de vao Shop", "M de mo ban do"]
+        for i, line in enumerate(lines):
+            screen.blit(self.font_big.render(line, True, WHITE), (160, 260 + i * 50))
 
     def draw_end_screen(self):
         screen.fill((10, 10, 14))
-        title = "THOAT THANH CONG" if self.state == "win" else "THAT BAI"
-        title_color = GREEN if self.state == "win" else RED
-        screen.blit(self.font_title.render(title, True, title_color), (110, 110))
-        screen.blit(self.font_big.render(self.end_reason, True, WHITE), (110, 190))
-        elapsed_seconds = (pygame.time.get_ticks() - self.stats_start) // 1000
-        stats = [
-            f"Zombie ha guc: {self.kill_count}",
-            f"NPC da cuu: {self.saved_npcs}",
-            f"Thoi gian song sot: {elapsed_seconds}s",
-            f"Chuong cao nhat: {self.chapter.title}",
-            "ENTER de choi lai",
-            "ESC de thoat",
+        title = "THOÁT THÀNH CÔNG" if self.state == "win" else "THẤT BẠI"
+        color = GREEN if self.state == "win" else RED
+        screen.blit(self.font_title.render(title, True, color), (110, 110))
+        screen.blit(self.font.render(self.end_reason, True, WHITE), (110, 190))
+        screen.blit(self.font_big.render("Nhấn ENTER để chơi lại", True, YELLOW), (110, SCREEN_HEIGHT - 100))
+
+    def draw_npc_portrait(self, x, y, color):
+        """Draw a custom-made NPC portrait using shapes."""
+        rect = pygame.Rect(x, y, 64, 64)
+        pygame.draw.rect(screen, (30, 30, 45), rect, border_radius=8)
+        pygame.draw.rect(screen, color, rect, 2, border_radius=8)
+        # Face
+        pygame.draw.circle(screen, (240, 200, 160), (x+32, y+35), 20)
+        # Hair/Hat based on color
+        pygame.draw.rect(screen, color, (x+12, y+10, 40, 15), border_top_left_radius=10, border_top_right_radius=10)
+        # Eyes
+        pygame.draw.circle(screen, BLACK, (x+25, y+32), 2)
+        pygame.draw.circle(screen, BLACK, (x+39, y+32), 2)
+        # Mouth
+        pygame.draw.arc(screen, BLACK, (x+22, y+38, 20, 10), 3.14, 0, 2)
+
+    def draw_sidebar(self):
+        panel_rect = pygame.Rect(MAP_WIDTH, 0, SIDEBAR_WIDTH, SCREEN_HEIGHT)
+        for i in range(panel_rect.height):
+            blend = i / panel_rect.height
+            color = (int(18 + blend * 8), int(22 + blend * 10), int(30 + blend * 14))
+            pygame.draw.line(screen, color, (panel_rect.x, i), (panel_rect.right, i))
+        pygame.draw.line(screen, self.chapter.chapter_color, (MAP_WIDTH + 1, 0), (MAP_WIDTH + 1, SCREEN_HEIGHT), 3)
+
+        # Header
+        header_rect = pygame.Rect(MAP_WIDTH + 14, 14, SIDEBAR_WIDTH - 28, 84)
+        self.draw_card(header_rect, self.chapter.chapter_color, title="LAST ROOF", subtitle=self.chapter.title)
+
+        # Stats
+        stat_rect = pygame.Rect(MAP_WIDTH + 14, 108, SIDEBAR_WIDTH - 28, 140)
+        self.draw_card(stat_rect, RED)
+        self.draw_bar(stat_rect.x + 16, stat_rect.y + 18, stat_rect.width - 32, 16, self.player.health, self.player.max_health, RED, "HP")
+        self.draw_bar(stat_rect.x + 16, stat_rect.y + 48, stat_rect.width - 32, 16, self.player.armor, 100, CYAN, "ARM")
+        self.draw_bar(stat_rect.x + 16, stat_rect.y + 78, stat_rect.width - 32, 16, self.player.stamina, self.player.max_stamina, YELLOW, "STM")
+        
+        # Current Weapon
+        weapon_name = self.weapon_manager.current_weapon.name
+        screen.blit(self.font_small.render(f"Weapon: {weapon_name}", True, WHITE), (stat_rect.x + 16, stat_rect.y + 110))
+
+        # Skills
+        skill_rect = pygame.Rect(MAP_WIDTH + 14, 258, SIDEBAR_WIDTH - 28, 120)
+        self.draw_card(skill_rect, BLUE, title="Skills [4-6]")
+        for i, skill in enumerate(self.skill_manager.skills):
+            sx = skill_rect.x + 16 + i * 70
+            sy = skill_rect.y + 44
+            screen.blit(skill.icon, (sx, sy))
+            if not skill.can_use():
+                cd_ratio = 1 - (pygame.time.get_ticks() - skill.last_used) / skill.cooldown
+                pygame.draw.rect(screen, (0, 0, 0, 150), (sx, sy, 48, 48 * cd_ratio))
+            pygame.draw.rect(screen, WHITE, (sx, sy, 48, 48), 1)
+
+        # Minimap
+        minimap_frame = pygame.Rect(MAP_WIDTH + 14, 390, SIDEBAR_WIDTH - 28, 200)
+        self.draw_card(minimap_frame, self.chapter.chapter_color, title="Tactical Map")
+        self.draw_minimap(pygame.Rect(minimap_frame.x + 12, minimap_frame.y + 40, minimap_frame.width - 24, 140))
+
+        # Info
+        info_rect = pygame.Rect(MAP_WIDTH + 14, 600, SIDEBAR_WIDTH - 28, 180)
+        self.draw_card(info_rect, CYAN, title="Control & Stats")
+        y = info_rect.y + 40
+        lines = [
+            f"Kills: {self.kill_count}", f"Saved: {self.saved_npcs}",
+            "B: Open Shop", "TAB: Path Mode", "M: Full Map"
         ]
-        y = 300
-        for line in stats:
-            screen.blit(self.font_big.render(line, True, WHITE), (112, y))
-            y += 46
+        for line in lines:
+            screen.blit(self.font_small.render(line, True, SOFT), (info_rect.x + 14, y))
+            y += 22
+
+    def draw_shop(self):
+        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        overlay.fill((10, 8, 12, 220))
+        screen.blit(overlay, (0, 0))
+        
+        shop_rect = pygame.Rect(100, 50, SCREEN_WIDTH - 200, SCREEN_HEIGHT - 100)
+        pygame.draw.rect(screen, PANEL, shop_rect, border_radius=20)
+        pygame.draw.rect(screen, WHITE, shop_rect, 2, border_radius=20)
+        
+        screen.blit(self.font_title.render("SURVIVOR SHOP", True, YELLOW), (shop_rect.x + 40, shop_rect.y + 30))
+        screen.blit(self.font.render("Press B to close", True, WHITE), (shop_rect.right - 200, shop_rect.y + 40))
+        
+        # Grid of cards
+        all_cards = list(SHOP_CARD_SURFACES.values())
+        for i, card in enumerate(all_cards[:20]):
+            r, c = i // 5, i % 5
+            cx = shop_rect.x + 60 + c * 160
+            cy = shop_rect.y + 120 + r * 140
+            
+            # Draw card with border
+            screen.blit(CARD_BORDER, (cx-4, cy-4))
+            screen.blit(pygame.transform.scale(card, (140, 110)), (cx+5, cy+5))
+            
+    def draw(self):
+        screen.fill(BLACK)
+        if self.state == "menu":
+            self.draw_menu()
+        elif self.state == "intro":
+            self.draw_intro()
+        elif self.state in ["playing", "pause"]:
+            self.draw_world()
+            self.draw_sidebar()
+            self.draw_overlays()
+            if self.show_shop:
+                self.draw_shop()
+            if self.state == "pause":
+                self.draw_pause()
+        elif self.state in ["win", "lose"]:
+            self.draw_end_screen()
+        pygame.display.flip()
 
     def handle_event(self, event):
         if event.type == pygame.QUIT:
             pygame.quit()
             sys.exit()
-        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-            self.mouse_down = True
-            return
-        if event.type == pygame.MOUSEBUTTONDOWN and event.button in (4, 5) and self.state == "playing":
-            if len(self.weapon_manager.weapons) > 1:
-                direction = 1 if event.button == 4 else -1
-                self.weapon_manager.cycle_weapon(direction)
-                self.popup = f"Da chuyen sang {self.weapon_manager.current_weapon.name}"
-                self.popup_timer = pygame.time.get_ticks() + 1200
-            return
-        if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
-            self.mouse_down = False
-            return
-        if event.type != pygame.KEYDOWN:
-            return
-
+        
         if self.state == "menu":
-            if event.key == pygame.K_RETURN:
-                self.stats_start = pygame.time.get_ticks()
-                self.trailer_started_at = pygame.time.get_ticks()
-                self.state = "intro"
-            elif event.key == pygame.K_h:
-                self.show_help = not self.show_help
-            elif event.key == pygame.K_ESCAPE:
-                pygame.quit()
-                sys.exit()
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_RETURN:
+                    self.trailer_started_at = pygame.time.get_ticks()
+                    self.state = "intro"
+                elif event.key == pygame.K_h:
+                    self.show_help = not self.show_help
             return
 
         if self.state == "intro":
-            if event.key == pygame.K_RETURN:
+            if event.type == pygame.KEYDOWN and event.key in (pygame.K_RETURN, pygame.K_SPACE):
                 self.state = "playing"
-            elif event.key == pygame.K_SPACE:
-                self.state = "playing"
-            return
-
-        if self.state in {"win", "lose"}:
-            if event.key == pygame.K_RETURN:
-                self.__init__()
-            elif event.key == pygame.K_ESCAPE:
-                pygame.quit()
-                sys.exit()
-            return
-
-        if self.state == "playing" and event.key == pygame.K_RETURN and self.next_chapter_ready:
-            if self.chapter_index == len(self.chapters) - 1:
-                self.end_reason = "Bạn đã lên được trực thăng và thoát khỏi thành phố."
-                self.state = "win"
-            else:
-                self.set_chapter(self.chapter_index + 1)
-            return
-
-        if self.dialog_npc:
-            if event.key in (pygame.K_RETURN, pygame.K_e, pygame.K_ESCAPE):
-                self.dialog_npc = None
-                self.dialog_speaker = ""
-                self.dialog_lines = []
-                self.advance_dialog_queue()
             return
 
         if self.state == "playing":
-            if event.key == pygame.K_ESCAPE:
-                self.state = "pause"
-            elif event.key == pygame.K_q:
-                if len(self.weapon_manager.weapons) > 1:
-                    self.weapon_manager.cycle_weapon()
-                    self.popup = f"Đã chuyển sang {self.weapon_manager.current_weapon.name}"
-                else:
-                    self.popup = "Chưa có vũ khí phụ để đổi."
-                self.popup_timer = pygame.time.get_ticks() + 1200
-            elif event.key == pygame.K_1:
-                if self.weapon_manager.weapons:
-                    self.weapon_manager.current_weapon = self.weapon_manager.weapons[0]
-                    self.popup = f"Da chuyen sang {self.weapon_manager.current_weapon.name}"
-                    self.popup_timer = pygame.time.get_ticks() + 1200
-            elif event.key == pygame.K_2:
-                if len(self.weapon_manager.weapons) >= 2:
-                    self.weapon_manager.current_weapon = self.weapon_manager.weapons[1]
-                    self.popup = f"Da chuyen sang {self.weapon_manager.current_weapon.name}"
-                    self.popup_timer = pygame.time.get_ticks() + 1200
-            elif event.key == pygame.K_3:
-                if len(self.weapon_manager.weapons) >= 3:
-                    self.weapon_manager.current_weapon = self.weapon_manager.weapons[2]
-                    self.popup = f"Da chuyen sang {self.weapon_manager.current_weapon.name}"
-                    self.popup_timer = pygame.time.get_ticks() + 1200
-            # --- Phím kỹ năng ---
-            elif event.key == pygame.K_4:
-                # Dùng kỹ năng 1
-                mx, my = pygame.mouse.get_pos()
-                self.skill_manager.use_skill(0, self.player.x, self.player.y, mx, my)
-                self.popup = f"Dùng kỹ năng: {self.skill_manager.skills[0].name}" if len(self.skill_manager.skills) > 0 else ""
-                self.popup_timer = pygame.time.get_ticks() + 1000
-            elif event.key == pygame.K_5:
-                mx, my = pygame.mouse.get_pos()
-                self.skill_manager.use_skill(1, self.player.x, self.player.y, mx, my)
-                self.popup = f"Dùng kỹ năng: {self.skill_manager.skills[1].name}" if len(self.skill_manager.skills) > 1 else ""
-                self.popup_timer = pygame.time.get_ticks() + 1000
-            elif event.key == pygame.K_6:
-                mx, my = pygame.mouse.get_pos()
-                self.skill_manager.use_skill(2, self.player.x, self.player.y, mx, my)
-                self.popup = f"Dùng kỹ năng: {self.skill_manager.skills[2].name}" if len(self.skill_manager.skills) > 2 else ""
-                self.popup_timer = pygame.time.get_ticks() + 1000
-            # ---
-            elif event.key == pygame.K_TAB:
-                self.hint_mode_index = (self.hint_mode_index + 1) % len(self.hint_modes)
-            elif event.key == pygame.K_m:
-                self.show_map = not self.show_map
-            elif event.key == pygame.K_e:
-                self.interact()
-            elif event.key == pygame.K_RETURN and self.chapter_card_timer > pygame.time.get_ticks():
-                self.chapter_card_timer = 0
-            elif event.key == pygame.K_SPACE and not self.dialog_npc and self.dialog_queue:
-                self.advance_dialog_queue()
-            return
+            if event.type == pygame.KEYDOWN:
+                if self.dialog_npc:
+                    if event.key in (pygame.K_e, pygame.K_SPACE, pygame.K_RETURN):
+                        self.dialog_npc = None
+                        # Advance queue if needed
+                    return
 
-        if self.state == "pause":
+                if event.key == pygame.K_q:
+                    self.weapon_manager.cycle_weapon()
+                if event.key == pygame.K_RETURN:
+                    if self.next_chapter_ready:
+                        if self.chapter_index < len(self.chapters) - 1:
+                            self.set_chapter(self.chapter_index + 1)
+                            self.state = "playing"
+                        else:
+                            self.state = "win"
+                    return
+
+                if event.key == pygame.K_b:
+                    self.show_shop = not self.show_shop
+                if self.show_shop: return
+
+                if event.key == pygame.K_ESCAPE:
+                    self.state = "pause"
+                elif event.key == pygame.K_m:
+                    self.show_map = not self.show_map
+                elif event.key == pygame.K_TAB:
+                    self.hint_mode_index = (self.hint_mode_index + 1) % len(self.hint_modes)
+                elif event.key == pygame.K_e:
+                    self.interact()
+                
+                # Skills selection
+                elif event.key == pygame.K_4:
+                    mx, my = pygame.mouse.get_pos()
+                    wmx, wmy = self.camera.screen_to_world(mx, my)
+                    self.skill_manager.use_skill(0, self.player.x, self.player.y, wmx, wmy)
+                elif event.key == pygame.K_5:
+                    mx, my = pygame.mouse.get_pos()
+                    wmx, wmy = self.camera.screen_to_world(mx, my)
+                    self.skill_manager.use_skill(1, self.player.x, self.player.y, wmx, wmy)
+                elif event.key == pygame.K_6:
+                    mx, my = pygame.mouse.get_pos()
+                    wmx, wmy = self.camera.screen_to_world(mx, my)
+                    self.skill_manager.use_skill(2, self.player.x, self.player.y, wmx, wmy)
+
+        if self.state == "pause" and event.type == pygame.KEYDOWN:
             if event.key == pygame.K_ESCAPE:
                 self.state = "playing"
-            elif event.key == pygame.K_m:
-                self.show_map = not self.show_map
-            elif event.key == pygame.K_TAB:
-                self.hint_mode_index = (self.hint_mode_index + 1) % len(self.hint_modes)
+        
+        if self.state in ["win", "lose"] and event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_RETURN:
+                self.__init__()
+                self.state = "playing"
+
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            self.mouse_down = True
+        if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+            self.mouse_down = False
 
 
 def main():
@@ -1904,8 +2137,7 @@ def main():
     while True:
         for event in pygame.event.get():
             game.handle_event(event)
-        if game.state == "intro" and pygame.time.get_ticks() > game.chapter_card_timer + 500:
-            pass
+        
         game.update()
         game.draw()
         clock.tick(FPS)
