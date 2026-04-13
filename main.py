@@ -165,6 +165,34 @@ DESERT_WALL.fill((40, 40, 52), special_flags=pygame.BLEND_RGB_MULT)
 DESERT_HUT = safe_load("Sprites/Sprites_Environment/desert_Hut.png", (64, 64))
 DESERT_BIG_GRASS = safe_load("Sprites/Sprites_Environment/desert_big_grass.png", (44, 44))
 DESERT_BIG_ROCK = safe_load("Sprites/Sprites_Environment/desert_big_rock.png", (54, 54))
+
+CHAPTER_TILES = {
+    "roof": {
+        "floor1": safe_load("Sprites/Sprites_Environment/roof_tile.png", (TILE_SIZE, TILE_SIZE)),
+        "floor2": safe_load("Sprites/Sprites_Environment/roof_tile2.png", (TILE_SIZE, TILE_SIZE)),
+        "wall": safe_load("Sprites/Sprites_Environment/roof_wall.png", (TILE_SIZE, TILE_SIZE)),
+    },
+    "office": {
+        "floor1": safe_load("Sprites/Sprites_Environment/office_tile.png", (TILE_SIZE, TILE_SIZE)),
+        "floor2": safe_load("Sprites/Sprites_Environment/office_tile2.png", (TILE_SIZE, TILE_SIZE)),
+        "wall": safe_load("Sprites/Sprites_Environment/office_wall.png", (TILE_SIZE, TILE_SIZE)),
+    },
+    "medical": {
+        "floor1": safe_load("Sprites/Sprites_Environment/medical_tile.png", (TILE_SIZE, TILE_SIZE)),
+        "floor2": safe_load("Sprites/Sprites_Environment/medical_tile2.png", (TILE_SIZE, TILE_SIZE)),
+        "wall": safe_load("Sprites/Sprites_Environment/medical_wall.png", (TILE_SIZE, TILE_SIZE)),
+    },
+    "ground": {
+        "floor1": safe_load("Sprites/Sprites_Environment/lobby_tile.png", (TILE_SIZE, TILE_SIZE)),
+        "floor2": safe_load("Sprites/Sprites_Environment/lobby_tile2.png", (TILE_SIZE, TILE_SIZE)),
+        "wall": safe_load("Sprites/Sprites_Environment/lobby_wall.png", (TILE_SIZE, TILE_SIZE)),
+    },
+    "escape": {
+        "floor1": safe_load("Sprites/Sprites_Environment/heli_tile.png", (TILE_SIZE, TILE_SIZE)),
+        "floor2": safe_load("Sprites/Sprites_Environment/heli_tile2.png", (TILE_SIZE, TILE_SIZE)),
+        "wall": safe_load("Sprites/Sprites_Environment/heli_wall.png", (TILE_SIZE, TILE_SIZE)),
+    }
+}
 TANK_BASE = safe_load("Sprites/Sprites_Building/Towers bases/Tower 06.png", (52, 52))
 TANK_TURRET = safe_load("Sprites/Sprites_Building/RocketLauncher.png", (52, 52))
 ROCKET_PICKUP = safe_load("Sprites/Sprites_Weapon/RPG-reisized.png", (34, 34))
@@ -294,6 +322,7 @@ class NPC:
     once: bool = True
     interacted: bool = False
     portrait_color: tuple[int, int, int] = CYAN
+    sprite_path: str = None
 
 
 @dataclass
@@ -550,7 +579,7 @@ class Game:
             ItemPickup((10, 31), "Bandage", "Bang gac tu tui cuu ho san thuong.", "heal", amount=25),
         ]
         roof_npcs = [
-            NPC("Phi cong", (38, 5), ["Toi chi lien lac duoc qua bo dam.", "Xuong cac tang duoi, mo cong san va goi tin hieu."], reward="radio", portrait_color=YELLOW),
+            NPC("Phi cong", (38, 5), ["Toi chi lien lac duoc qua bo dam.", "Xuong cac tang duoi, mo cong san va goi tin hieu."], reward="radio", portrait_color=YELLOW, sprite_path="Sprites/Sprites_NPC/pilot.png"),
         ]
         roof_enemies = [
             (Goblin, (18, 7), "basic"),
@@ -576,7 +605,7 @@ class Game:
             ItemPickup((24, 5), "Ammo", "Dan du tru tu phong nhan su.", "ammo", amount=18, color=WHITE),
         ]
         office_npcs = [
-            NPC("Bao ve Nam", (21, 17), ["Toi giu duoc phong camera nhung cua dang ket.", "Lay the tu, gan cau chi roi mo loi xuong."], reward="map", portrait_color=BLUE),
+            NPC("Bao ve Nam", (21, 17), ["Toi giu duoc phong camera nhung cua dang ket.", "Lay the tu, gan cau chi roi mo loi xuong."], reward="map", portrait_color=BLUE, sprite_path="Sprites/Sprites_NPC/guard.png"),
         ]
         office_enemies = [
             (Goblin, (9, 17), "basic"),
@@ -601,7 +630,7 @@ class Game:
             ItemPickup((27, 8), "Rifle Ammo", "Dan hiem cho sung truong.", "ammo", amount=28, color=WHITE),
         ]
         med_npcs = [
-            NPC("Y ta Linh", (18, 7), ["Toi van con giu duoc kho thuoc.", "Neu cau lay duoc nguon dien, toi se chi duong xuong tang 1."], reward="medkit", portrait_color=GREEN),
+            NPC("Y ta Linh", (18, 7), ["Toi van con giu duoc kho thuoc.", "Neu cau lay duoc nguon dien, toi se chi duong xuong tang 1."], reward="medkit", portrait_color=GREEN, sprite_path="Sprites/Sprites_NPC/medic.png"),
         ]
         med_enemies = [
             (Mushroom, (9, 21), "tank"),
@@ -630,7 +659,7 @@ class Game:
             ItemPickup((38, 36), "Rescue Flare", "Phao sang dung de xac nhan vi tri ha canh.", "flare", color=RED),
         ]
         ground_npcs = [
-            NPC("Ky thuat vien Huy", (17, 18), ["Toi giu duoc bo phat o san.", "Mo cong roi bat beacon, toi se cau gio cho cau."], reward="shortcut", portrait_color=ORANGE),
+            NPC("Ky thuat vien Huy", (17, 18), ["Toi giu duoc bo phat o san.", "Mo cong roi bat beacon, toi se cau gio cho cau."], reward="shortcut", portrait_color=ORANGE, sprite_path="Sprites/Sprites_NPC/engineer.png"),
         ]
         ground_enemies = [
             (Goblin, (18, 6), "basic"),
@@ -1477,17 +1506,21 @@ class Game:
         self.draw_chapter_backdrop(surface)
         
         # 2. Tiles
+        current_tiles = CHAPTER_TILES.get(self.chapter.id)
+        if not current_tiles:
+            base_1, base_2, wall_tile = DESERT_TILE, DESERT_TILE_ALT, DESERT_WALL
+        else:
+            base_1, base_2, wall_tile = current_tiles["floor1"], current_tiles["floor2"], current_tiles["wall"]
+
         for ty in range(min_ty, max_ty + 1):
             for tx in range(min_tx, max_tx + 1):
-                base_tile = DESERT_TILE_ALT if (tx * 3 + ty * 5) % 11 == 0 else DESERT_TILE
+                base_tile = base_2 if (tx * 3 + ty * 5) % 11 == 0 else base_1
                 sx, sy = self.camera.world_to_screen(tx * TILE_SIZE, ty * TILE_SIZE)
                 surface.blit(base_tile, (sx, sy))
                 
                 # Vẽ bức tường (vật cản)
                 if (tx, ty) in self.current_blocked:
-                    # Sử dụng sprite gạch đá tông tối để trông chuyên nghiệp hơn
-                    surface.blit(DESERT_WALL, (sx, sy))
-                    pygame.draw.rect(surface, (20, 20, 30), (sx, sy, TILE_SIZE, TILE_SIZE), 1)
+                    surface.blit(wall_tile, (sx, sy))
                 elif (tx + ty) % 9 == 0:
                     surface.blit(DESERT_GRASS, (sx, sy))
                 elif (tx * 7 + ty * 3) % 19 == 0:
@@ -1522,8 +1555,19 @@ class Game:
             if self.camera.is_visible(npc.grid_pos[0]*TILE_SIZE, npc.grid_pos[1]*TILE_SIZE):
                 sx, sy = self.camera.world_to_screen(npc.grid_pos[0]*TILE_SIZE + 8, npc.grid_pos[1]*TILE_SIZE + 8)
                 color = GRAY if npc.interacted else npc.color
-                pygame.draw.circle(surface, color, (sx, sy), 7)
-                pygame.draw.circle(surface, WHITE, (sx, sy), 7, 1)
+                
+                # Use sprite if available
+                if npc.sprite_path and npc.sprite_path in ALL_GRAPHICS_SURFACES:
+                    sprite = ALL_GRAPHICS_SURFACES[npc.sprite_path]
+                    surface.blit(sprite, sprite.get_rect(center=(sx, sy)))
+                elif npc.sprite_path and os.path.exists(npc.sprite_path):
+                    # Load dynamically if not in ALL_GRAPHICS
+                    sprite = pygame.image.load(npc.sprite_path).convert_alpha()
+                    ALL_GRAPHICS_SURFACES[npc.sprite_path] = sprite
+                    surface.blit(sprite, sprite.get_rect(center=(sx, sy)))
+                else:
+                    pygame.draw.circle(surface, color, (sx, sy), 7)
+                    pygame.draw.circle(surface, WHITE, (sx, sy), 7, 1)
 
         for entry in self.story_enemies:
             if self.camera.is_visible(entry.enemy.x, entry.enemy.y):
