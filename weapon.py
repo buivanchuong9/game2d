@@ -2,15 +2,18 @@ import pygame
 import math
 
 class Bullet:
-    def __init__(self, x, y, target_x, target_y, speed=5, damage=3000):
+    def __init__(self, x, y, target_x, target_y, speed=5, damage=3000, radius=0, image_path="Sprites/Sprites_Effect/Bullets/14.png", scale=(48, 48)):
         self.x = x
         self.y = y
         self.speed = speed
         self.damage = damage
+        self.radius = radius
+        self.exploded = False
+        self.explosion_timer = 0
         
         # Load and scale bullet image
-        self.original_image = pygame.image.load("Sprites/Sprites_Effect/Bullets/14.png").convert_alpha()
-        self.original_image = pygame.transform.scale(self.original_image, (48, 48))  # Adjust these numbers for desired size
+        self.original_image = pygame.image.load(image_path).convert_alpha()
+        self.original_image = pygame.transform.scale(self.original_image, scale)
 
         # Calculate direction vector
         dx = target_x - x
@@ -24,14 +27,25 @@ class Bullet:
         self.image = pygame.transform.rotate(self.original_image, -self.angle)
         
     def update(self):
+        if self.exploded:
+            self.explosion_timer -= 1
+            return
         self.x += self.dx
         self.y += self.dy
+
+    def explode(self):
+        self.exploded = True
+        self.explosion_timer = 8
         
     def draw(self, surface):
+        if self.exploded and self.radius > 0:
+            pygame.draw.circle(surface, (255, 160, 70), (int(self.x), int(self.y)), self.radius, 3)
+            pygame.draw.circle(surface, (255, 220, 120), (int(self.x), int(self.y)), max(6, self.radius // 2))
+            return
         surface.blit(self.image, (self.x - self.image.get_width() // 2, self.y - self.image.get_height() // 2))
 
 class Weapon:
-    def __init__(self, name, fire_rate, reload_time, image_path):
+    def __init__(self, name, fire_rate, reload_time, image_path, projectile_speed=5, damage=3000, projectile_radius=0, projectile_image="Sprites/Sprites_Effect/Bullets/14.png", projectile_scale=(48, 48)):
         self.name = name
         self.fire_rate = fire_rate  # Shots per second
         self.reload_time = reload_time  # Seconds
@@ -39,6 +53,13 @@ class Weapon:
         self.bullets = []
         self.offset = 30  # Distance from player
         self.angle = 0  # Current angle of weapon
+        self.x = 0
+        self.y = 0
+        self.projectile_speed = projectile_speed
+        self.damage = damage
+        self.projectile_radius = projectile_radius
+        self.projectile_image = projectile_image
+        self.projectile_scale = projectile_scale
         
         # Load weapon image
         try:
@@ -47,6 +68,7 @@ class Weapon:
         except:
             self.image = pygame.Surface((32, 32))
             self.image.fill((100, 100, 100))
+        self.rotated_image = self.image
     
     def update_position(self, player_x, player_y, target_x, target_y):
         # Calculate angle to target
@@ -75,8 +97,22 @@ class Weapon:
     
     def shoot(self, target_x, target_y):
         if self.can_shoot():
-            self.bullets.append(Bullet(self.x, self.y, target_x, target_y))
+            self.bullets.append(
+                Bullet(
+                    self.x,
+                    self.y,
+                    target_x,
+                    target_y,
+                    speed=self.projectile_speed,
+                    damage=self.damage,
+                    radius=self.projectile_radius,
+                    image_path=self.projectile_image,
+                    scale=self.projectile_scale,
+                )
+            )
             self.last_shot_time = pygame.time.get_ticks()
+            return True
+        return False
     
     def update_bullets(self, enemies):
         bullets_to_remove = []
@@ -89,14 +125,24 @@ class Weapon:
                     enemy_rect = pygame.Rect(enemy.x - 25, enemy.y - 25, 50, 50)
                     bullet_rect = pygame.Rect(bullet.x - 2, bullet.y - 2, 4, 4)
                     
-                    if bullet_rect.colliderect(enemy_rect):
-                        enemy.take_damage(bullet.damage)
+                    if not bullet.exploded and bullet_rect.colliderect(enemy_rect):
+                        if bullet.radius > 0:
+                            bullet.explode()
+                            for splash_enemy in enemies:
+                                if not splash_enemy.is_dead:
+                                    dist = math.hypot(splash_enemy.x - bullet.x, splash_enemy.y - bullet.y)
+                                    if dist <= bullet.radius:
+                                        splash_enemy.take_damage(bullet.damage)
+                        else:
+                            enemy.take_damage(bullet.damage)
                         bullets_to_remove.append(bullet)
                         break
             
             # Remove bullets that are off screen
             if (bullet.x < 0 or bullet.x > 800 or 
                 bullet.y < 0 or bullet.y > 800):
+                bullets_to_remove.append(bullet)
+            if bullet.exploded and bullet.explosion_timer <= 0:
                 bullets_to_remove.append(bullet)
         
         # Remove used bullets
@@ -120,39 +166,52 @@ class WeaponManager:
         self.current_weapon = None
         
         # Add initial test weapon
-        self.add_weapon("Basic Gun", 5, 1, "Sprites/Sprites_Weapon/Assaut-rifle-4-scoped.png")
+        self.add_weapon("Basic Gun", 5, 1, "Sprites/Sprites_Weapon/Assaut-rifle-4-scoped.png", projectile_speed=8, damage=55, projectile_scale=(36, 36))
         
-    def add_weapon(self, name, fire_rate, reload_time, image_path):
-        if len(self.weapons) < self.max_weapons:
-            weapon = Weapon(name, fire_rate, reload_time, image_path)
-            self.weapons.append(weapon)
-            if self.current_weapon is None:
-                self.current_weapon = weapon
-    
-    def update(self, player_x, player_y, enemies):
-        if not self.current_weapon:
+    def get_weapon(self, name):
+        for weapon in self.weapons:
+            if weapon.name.lower() == name.lower():
+                return weapon
+        return None
+
+    def select_weapon(self, name):
+        weapon = self.get_weapon(name)
+        if weapon:
+            self.current_weapon = weapon
+            return True
+        return False
+
+    def add_weapon(self, name, fire_rate, reload_time, image_path, projectile_speed=5, damage=3000, projectile_radius=0, projectile_image="Sprites/Sprites_Effect/Bullets/14.png", projectile_scale=(48, 48), equip_on_add=False):
+        existing = self.get_weapon(name)
+        if existing:
+            if equip_on_add:
+                self.current_weapon = existing
+            return False
+        if len(self.weapons) >= self.max_weapons:
+            return False
+
+        weapon = Weapon(name, fire_rate, reload_time, image_path, projectile_speed, damage, projectile_radius, projectile_image, projectile_scale)
+        self.weapons.append(weapon)
+        if self.current_weapon is None or equip_on_add:
+            self.current_weapon = weapon
+        return True
+
+    def cycle_weapon(self, direction=1):
+        if not self.weapons:
             return
-            
-        # Get living enemies only
-        living_enemies = [e for e in enemies if not e.is_dead]
-        
-        if living_enemies:
-            # Find nearest living enemy
-            nearest_enemy = min(living_enemies, 
-                key=lambda e: math.sqrt((e.x - player_x)**2 + (e.y - player_y)**2))
-            
-            # Update weapon position and orientation
-            self.current_weapon.update_position(player_x, player_y, 
-                                            nearest_enemy.x, nearest_enemy.y)
-            
-            # Auto-shoot at nearest enemy
-            self.current_weapon.shoot(nearest_enemy.x, nearest_enemy.y)
-        else:
-            # If no living enemies, just move weapon with player at current angle
-            self.current_weapon.move_with_player(player_x, player_y)
-            
-        # Update bullets
+        index = self.weapons.index(self.current_weapon)
+        self.current_weapon = self.weapons[(index + direction) % len(self.weapons)]
+    
+    def update(self, player_x, player_y, target_x, target_y, is_shooting, enemies):
+        if not self.current_weapon:
+            return False
+
+        self.current_weapon.update_position(player_x, player_y, target_x, target_y)
+        shot_fired = False
+        if is_shooting:
+            shot_fired = self.current_weapon.shoot(target_x, target_y)
         self.current_weapon.update_bullets(enemies)
+        return shot_fired
     
     def draw(self, surface):
         if self.current_weapon:
