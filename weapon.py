@@ -45,7 +45,7 @@ class Bullet:
         surface.blit(self.image, (self.x - self.image.get_width() // 2, self.y - self.image.get_height() // 2))
 
 class Weapon:
-    def __init__(self, name, fire_rate, reload_time, image_path, projectile_speed=5, damage=3000, projectile_radius=0, projectile_image="Sprites/Sprites_Effect/Bullets/14.png", projectile_scale=(48, 48)):
+    def __init__(self, name, fire_rate, reload_time, image_path, projectile_speed=5, damage=3000, projectile_radius=0, projectile_image=None, projectile_scale=(48, 48), melee=False):
         self.name = name
         self.fire_rate = fire_rate  # Shots per second
         self.reload_time = reload_time  # Seconds
@@ -58,9 +58,15 @@ class Weapon:
         self.projectile_speed = projectile_speed
         self.damage = damage
         self.projectile_radius = projectile_radius
-        self.projectile_image = projectile_image
+        # Hiệu ứng đạn đẹp hơn
+        if projectile_image is None:
+            import random
+            bullet_imgs = [f"Sprites/Sprites_Effect/Bullets/{i:02}.png" for i in range(1, 30)]
+            self.projectile_image = random.choice(bullet_imgs)
+        else:
+            self.projectile_image = projectile_image
         self.projectile_scale = projectile_scale
-        
+        self.melee = melee
         # Load weapon image
         try:
             self.image = pygame.image.load(image_path).convert_alpha()
@@ -97,19 +103,38 @@ class Weapon:
     
     def shoot(self, target_x, target_y):
         if self.can_shoot():
-            self.bullets.append(
-                Bullet(
-                    self.x,
-                    self.y,
-                    target_x,
-                    target_y,
-                    speed=self.projectile_speed,
-                    damage=self.damage,
-                    radius=self.projectile_radius,
-                    image_path=self.projectile_image,
-                    scale=self.projectile_scale,
+            # Nếu là kiếm thì hiệu ứng cận chiến
+            if self.melee:
+                self.bullets.append(
+                    Bullet(
+                        self.x,
+                        self.y,
+                        target_x,
+                        target_y,
+                        speed=0,
+                        damage=self.damage,
+                        radius=0,
+                        image_path="Sprites/Sprites_Effect/Bullets/03.png",
+                        scale=(64, 64),
+                    )
                 )
-            )
+            else:
+                import random
+                bullet_imgs = [f"Sprites/Sprites_Effect/Bullets/{i:02}.png" for i in range(1, 30)]
+                img = random.choice(bullet_imgs)
+                self.bullets.append(
+                    Bullet(
+                        self.x,
+                        self.y,
+                        target_x,
+                        target_y,
+                        speed=self.projectile_speed,
+                        damage=self.damage,
+                        radius=self.projectile_radius,
+                        image_path=img,
+                        scale=self.projectile_scale,
+                    )
+                )
             self.last_shot_time = pygame.time.get_ticks()
             return True
         return False

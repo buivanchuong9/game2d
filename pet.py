@@ -14,5 +14,8 @@ class Pet:
         self.y = self.player.y + 40
 
     def draw(self, surface):
-        """Draw the pet on the screen (placeholder)."""
-        pygame.draw.circle(surface, (255, 182, 193), (self.x, self.y), 10)
+        # Nếu có sprite động thì vẽ sprite, không thì vẽ hình tròn
+        if hasattr(self, "sprite"):
+            surface.blit(self.sprite, (self.x - 17, self.y - 17))
+        else:
+            pygame.draw.circle(surface, (255, 182, 193), (self.x, self.y), 10)

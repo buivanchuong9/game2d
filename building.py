@@ -3,14 +3,14 @@ import pygame
 
 class Building:
     def __init__(self, x, y):
-        """Initialize a basic building."""
+        # Khoi tao toa nha co ban
         self.x = x
         self.y = y
 
     def update(self):
-        """Update building state (placeholder)."""
+        # Cap nhat trang thai toa nha
         pass
 
     def draw(self, surface):
-        """Draw the building (placeholder)."""
+        # Ve toa nha
         pygame.draw.rect(surface, (139, 69, 19), (self.x, self.y, 64, 64))

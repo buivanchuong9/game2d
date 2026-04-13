@@ -1,3 +1,32 @@
+# Màu và hằng số giao diện bổ sung
+GRAY = (120, 120, 120)
+SOFT = (200, 200, 220)
+STROKE = (40, 44, 54)
+CARD = (28, 30, 40)
+CARD_ALT = (38, 40, 50)
+OVERLAY = (10, 8, 12, 180)
+PANEL = (24, 26, 34)
+FPS = 60
+import pygame
+
+# Định nghĩa các màu cơ bản
+BLACK = (0, 0, 0)
+WHITE = (255, 255, 255)
+RED = (255, 0, 0)
+GREEN = (0, 255, 0)
+BLUE = (0, 128, 255)
+CYAN = (0, 255, 255)
+YELLOW = (255, 255, 0)
+ORANGE = (255, 165, 0)
+
+"""
+Shop chọn card (vũ khí, pet, hiệu ứng) xuất hiện khi nhấn S.
+Đổi nhạc nền khi qua màn hoặc khi vào boss.
+Hiệu ứng âm thanh khi bắn, trúng địch, dùng kỹ năng, mở rương.
+Hiển thị pet đồng hành và cho phép đổi pet.
+Hiển thị card shop, pet, weapon ngẫu nhiên khi mở shop.
+Hướng dẫn phím tắt mới trên giao diện.
+"""
 import math
 import os
 import random
@@ -10,6 +39,19 @@ from enemy import FlyingEye, Goblin, Mushroom, Skeleton, BigFlyingEye, DashingGo
 from pathfinding import a_star, bfs, dfs, greedy_safe
 from player import Player
 from weapon import WeaponManager
+from all_graphics import ALL_GRAPHICS
+
+pygame.init()
+
+# Tự động load toàn bộ file đồ họa vào dict ALL_GRAPHICS_SURFACES
+ALL_GRAPHICS_SURFACES = {}
+for path in ALL_GRAPHICS:
+    try:
+        img = pygame.image.load(path).convert_alpha()
+        ALL_GRAPHICS_SURFACES[path] = img
+    except Exception as e:
+        print(f"[GRAPHICS LOAD ERROR] {path}: {e}")
+from skill import SkillManager, Skill
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -18,42 +60,86 @@ os.chdir(BASE_DIR)
 
 pygame.init()
 
+
 TILE_SIZE = 16
 GRID_SIZE = 44
+# SCREEN_WIDTH và SCREEN_HEIGHT sẽ được lấy từ infoObject phía dưới
 MAP_WIDTH = TILE_SIZE * GRID_SIZE
 MAP_HEIGHT = TILE_SIZE * GRID_SIZE
+# screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+
+# --- FULLSCREEN + TỰ ĐỘNG LOAD ASSET ---
 SIDEBAR_WIDTH = 256
-SCREEN_WIDTH = MAP_WIDTH + SIDEBAR_WIDTH
-SCREEN_HEIGHT = MAP_HEIGHT
-FPS = 60
-
-WHITE = (244, 235, 214)
-BLACK = (10, 10, 14)
-RED = (182, 52, 52)
-GREEN = (72, 163, 103)
-BLUE = (74, 122, 196)
-YELLOW = (224, 190, 89)
-CYAN = (93, 205, 205)
-ORANGE = (222, 123, 61)
-GRAY = (88, 88, 88)
-PANEL = (23, 25, 33)
-PANEL_ALT = (36, 39, 50)
-OVERLAY = (12, 12, 18, 210)
-SOFT = (210, 214, 225)
-CARD = (18, 22, 32)
-CARD_ALT = (26, 31, 43)
-STROKE = (64, 72, 92)
-
+import glob
+SCREEN_WIDTH = 1200
+SCREEN_HEIGHT = 800
+MAP_WIDTH = SCREEN_WIDTH - SIDEBAR_WIDTH
+MAP_HEIGHT = SCREEN_HEIGHT
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-pygame.display.set_caption("Last Roof: Escape City")
+pygame.display.set_caption("San thuong cuoi: Thoat khoi thanh pho")
 clock = pygame.time.Clock()
+
+# Tự động load toàn bộ file đồ họa vào dict ALL_GRAPHICS_SURFACES
+ALL_GRAPHICS_SURFACES = {}
+for path in ALL_GRAPHICS:
+    try:
+        img = pygame.image.load(path).convert_alpha()
+        ALL_GRAPHICS_SURFACES[path] = img
+    except Exception as e:
+        print(f"[GRAPHICS LOAD ERROR] {path}: {e}")
+
+# Tự động load toàn bộ card shop
+SHOP_CARD_SURFACES = {}
+for path in glob.glob("Shop_Cards/*.png"):
+    try:
+        img = pygame.image.load(path).convert_alpha()
+        SHOP_CARD_SURFACES[path] = img
+    except Exception as e:
+        print(f"[SHOP CARD LOAD ERROR] {path}: {e}")
+
+# Tự động load toàn bộ sound
+SOUND_EFFECTS = {}
+for path in glob.glob("Sounds/*.mp3"):
+    try:
+        SOUND_EFFECTS[path] = pygame.mixer.Sound(path)
+    except Exception as e:
+        print(f"[SOUND LOAD ERROR] {path}: {e}")
+
+# Hàm phát nhạc nền
+def play_bg_music():
+    try:
+        pygame.mixer.music.load("Sounds/Game_loop_music.mp3")
+        pygame.mixer.music.play(-1)
+    except Exception as e:
+        print(f"[MUSIC ERROR] {e}")
+
+# Hàm lấy card shop ngẫu nhiên
+def get_random_shop_card():
+    import random
+    if SHOP_CARD_SURFACES:
+        return random.choice(list(SHOP_CARD_SURFACES.values()))
+    return None
+
+# Hàm phát hiệu ứng âm thanh
+def play_sound_effect(name):
+    for path, snd in SOUND_EFFECTS.items():
+        if name.lower() in path.lower():
+            snd.play()
+            break
+
+# Hàm lấy pet/card/weapon ngẫu nhiên (ví dụ)
+def get_random_pet_card():
+    pet_cards = [k for k in SHOP_CARD_SURFACES if "Pet" in k]
+    if pet_cards:
+        return SHOP_CARD_SURFACES[random.choice(pet_cards)]
+    return None
 
 
 def load_ui_font(size, bold=False):
-    for name in ["Arial Unicode MS", "Arial", "Helvetica", "Verdana", "DejaVu Sans"]:
-        path = pygame.font.match_font(name, bold=bold)
-        if path:
-            return pygame.font.Font(path, size)
+    # Chi dung font Arial
+    path = pygame.font.match_font("Arial", bold=bold)
+    if path:
+        return pygame.font.Font(path, size)
     return pygame.font.Font(None, size)
 
 
@@ -287,29 +373,29 @@ class MissionTracker:
         d = self.data
         if cid == "roof":
             return [
-                ("Nhặt vũ khí cơ bản", d["weapon_collected"]),
-                ("Tiêu diệt zombie đầu tiên", d["zombies_killed"] >= 1),
-                ("Sẵn sàng vào màn chơi chính", d["weapon_collected"] and d["zombies_killed"] >= 1),
+                ("Nhat vu khi co ban", d["weapon_collected"]),
+                ("Tieu diet zombie dau tien", d["zombies_killed"] >= 1),
+                ("San sang vao man choi chinh", d["weapon_collected"] and d["zombies_killed"] >= 1),
             ]
         if cid == "office":
             return [
-                ("Tìm thẻ từ của bảo vệ", d["keycard_collected"]),
-                ("Khôi phục điện hành lang", d["power_restored"]),
-                ("Gặp NPC bảo vệ", d["npc_saved"] >= 1),
-                ("Tới cầu thang xuống tầng 2", d["gate_opened"]),
+                ("Tim the tu cua bao ve", d["keycard_collected"]),
+                ("Khoi phuc dien hanh lang", d["power_restored"]),
+                ("Gap NPC bao ve", d["npc_saved"] >= 1),
+                ("Toi cau thang xuong tang 2", d["gate_opened"]),
             ]
         if cid == "medical":
             return [
-                ("Thu thập kho thuốc", d["supply_cache"]),
-                ("Hạ zombie đặc biệt", d["special_kills"] >= 3),
-                ("Hỗ trợ y tá sống sót", d["npc_saved"] >= 1),
-                ("Mở đường xuống tầng 1", d["gate_opened"]),
+                ("Thu thap kho thuoc", d["supply_cache"]),
+                ("Ha zombie dac biet", d["special_kills"] >= 3),
+                ("Ho tro y ta song sot", d["npc_saved"] >= 1),
+                ("Mo duong xuong tang 1", d["gate_opened"]),
             ]
         return [
-            ("Mở cổng ra sân", d["gate_opened"]),
-            ("Kích hoạt tín hiệu cứu hộ", d["signal_started"]),
-            ("Trụ vững tới khi trực thăng tới", d["holdout_complete"]),
-            ("Hạ boss đột biến", d["boss_down"]),
+            ("Mo cong ra san", d["gate_opened"]),
+            ("Kich hoat tin hieu cuu ho", d["signal_started"]),
+            ("Tru vung toi khi truc thang toi", d["holdout_complete"]),
+            ("Ha boss dot bien", d["boss_down"]),
         ]
 
     def complete(self):
@@ -319,11 +405,32 @@ class MissionTracker:
 class Game:
     def __init__(self):
         self.font = load_ui_font(22)
+        # Pet mặc định (nếu chưa chọn pet, sẽ là PET_BIRD)
+        self.current_pet = PET_BIRD
         self.font_big = load_ui_font(40, bold=True)
         self.font_title = load_ui_font(64, bold=True)
         self.font_small = load_ui_font(18)
         self.player = Player(120, 120)
         self.weapon_manager = WeaponManager()
+        # --- Kỹ năng ---
+        self.skill_manager = SkillManager()
+        # Thêm kỹ năng mẫu, bạn có thể thêm nhiều kỹ năng khác nhau ở đây
+        self.skill_manager.add_skill(Skill(
+            "Fireball", 2000, "Sprites/Sprites_Effect/Bullets/All_Fire_Bullet_Pixel_16x16_05.png",
+            effect_image_path="Sprites/Sprites_Effect/Bullets/Introl Yellow Effect Bullet Impact Explosion 32x32.gif",
+            scale=(40,40), effect_scale=(48,48)
+        ))
+        self.skill_manager.add_skill(Skill(
+            "Ice Blast", 3000, "Sprites/Sprites_Effect/Bullets/Introl Blue Effect Bullet Impact Explosion 32x32.gif",
+            effect_image_path="Sprites/Sprites_Effect/Bullets/Introl Blue Effect Bullet Impact Explosion 32x32.gif",
+            scale=(40,40), effect_scale=(48,48)
+        ))
+        self.skill_manager.add_skill(Skill(
+            "Green Wave", 2500, "Sprites/Sprites_Effect/Bullets/Introl Green Effect Bullet Impact Explosion 32x32.gif",
+            effect_image_path="Sprites/Sprites_Effect/Bullets/Introl Green Effect Bullet Impact Explosion 32x32.gif",
+            scale=(40,40), effect_scale=(48,48)
+        ))
+        # ---
         self.mouse_down = False
         self.shot_counter = 0
         self.frenzy_until = 0
@@ -406,14 +513,10 @@ class Game:
         ]
 
         office_blocked = ring_walls()
-        for x in range(5, 39):
-            office_blocked.add((x, 10))
-            office_blocked.add((x, 22))
-        for y in range(4, 36):
-            office_blocked.add((14, y))
-            office_blocked.add((30, y))
-        for pos in [(14, 7), (14, 28), (22, 10), (30, 18), (30, 30), (8, 22)]:
-            office_blocked.discard(pos)
+        # Chỉ để lại một số vật cản nhỏ ở map office, không tạo tường kín
+        # Ví dụ: chỉ để các vật cản ở góc hoặc một số điểm
+        for pos in [(8, 10), (14, 15), (22, 18), (30, 12), (35, 20), (10, 28), (28, 30)]:
+            office_blocked.add(pos)
         office_items = [
             ItemPickup((8, 6), "Keycard", "The tu mo cua an ninh tang 3.", "keycard", color=BLUE),
             ItemPickup((35, 28), "Fuse", "Cau chi phu cho dien hanh lang.", "power", color=YELLOW),
@@ -433,15 +536,10 @@ class Game:
         ]
 
         med_blocked = ring_walls()
-        for x in range(6, 38):
-            med_blocked.add((x, 12))
-            med_blocked.add((x, 30))
-        for y in range(5, 36):
-            med_blocked.add((12, y))
-            med_blocked.add((24, y))
-            med_blocked.add((34, y))
-        for pos in [(12, 8), (12, 22), (18, 12), (24, 16), (24, 30), (34, 20), (34, 32)]:
-            med_blocked.discard(pos)
+        # Giảm số lượng tường ở màn 3 để dễ di chuyển hơn
+        # Chỉ để một số vật cản nhỏ, không tạo tường kín
+        for pos in [(8, 12), (14, 15), (22, 18), (30, 12), (35, 20), (10, 28), (28, 30), (18, 24), (24, 22), (34, 28)]:
+            med_blocked.add(pos)
         med_items = [
             ItemPickup((6, 6), "Medkit", "Mot hop cuu thuong lon trong phong cap cuu.", "heal", amount=50),
             ItemPickup((19, 20), "Armor Vest", "Ao giap nhe giup giam sat thuong.", "armor", amount=25, color=CYAN),
@@ -486,7 +584,8 @@ class Game:
             (Mushroom, (28, 18), "tank"),
             (Skeleton, (6, 28), "special"),
             (FlyingEye, (37, 24), "fast"),
-            (BigFlyingEye, (33, 35), "boss"),
+            # Boss to, máu 100
+            (BigFlyingEye, (33, 35), {"type": "boss", "health": 100}),
             (Goblin, (14, 27), "basic"),
             (DashingGoblin, (30, 31), "fast"),
         ]
@@ -634,9 +733,17 @@ class Game:
         for enemy_cls, grid_pos, archetype in self.chapter.enemy_plan:
             ex = grid_pos[0] * TILE_SIZE + TILE_SIZE // 2
             ey = grid_pos[1] * TILE_SIZE + TILE_SIZE // 2
-            enemy = enemy_cls(ex, ey)
-            enemy.obstacle_map = self.build_obstacle_grid()
-            self.story_enemies.append(StoryEnemy(enemy, archetype, grid_pos))
+            # Nếu là boss cuối cùng và có dict health
+            if isinstance(archetype, dict) and archetype.get("type") == "boss":
+                enemy = enemy_cls(ex, ey)
+                enemy.health = archetype.get("health", 100)
+                enemy.max_health = archetype.get("health", 100)
+                enemy.obstacle_map = self.build_obstacle_grid()
+                self.story_enemies.append(StoryEnemy(enemy, "boss", grid_pos))
+            else:
+                enemy = enemy_cls(ex, ey)
+                enemy.obstacle_map = self.build_obstacle_grid()
+                self.story_enemies.append(StoryEnemy(enemy, archetype, grid_pos))
 
         self.power_boxes = []
         self.gates = []
@@ -899,29 +1006,60 @@ class Game:
         if self.state != "playing":
             return
         keys = pygame.key.get_pressed()
-        self.player.update(keys, self.current_blocked, MAP_WIDTH, MAP_HEIGHT, TILE_SIZE)
+        # Map vô hạn: không giới hạn MAP_WIDTH, MAP_HEIGHT
+        self.player.update(keys, self.current_blocked, None, None, TILE_SIZE)
         self.update_enemies()
-        self.spawn_dynamic_enemies()
+        self.spawn_dynamic_enemies_infinite()
         if self.chapter.id == "ground" and self.mission.data["gate_opened"]:
             self.tank.set_target(self.player.x - 40, self.player.y + 35)
         self.tank.update()
         mouse_x, mouse_y = pygame.mouse.get_pos()
-        world_mouse_x = max(0, min(mouse_x, MAP_WIDTH - 1))
-        world_mouse_y = max(0, min(mouse_y, MAP_HEIGHT - 1))
         shot_fired = self.weapon_manager.update(
             self.player.x,
             self.player.y,
-            world_mouse_x,
-            world_mouse_y,
-            self.mouse_down and mouse_x < MAP_WIDTH,
+            mouse_x,
+            mouse_y,
+            self.mouse_down and mouse_x < SCREEN_WIDTH - SIDEBAR_WIDTH,
             [entry.enemy for entry in self.story_enemies],
         )
+        # Update kỹ năng
+        self.skill_manager.update()
         self.update_frenzy(shot_fired)
         self.handle_progression()
         self.update_hint_path()
+        # Spawn item ngẫu nhiên trên map lớn
+        import random
+        if hasattr(self, "chapter") and self.chapter and random.random() < 0.002:
+            gx = random.randint(-100, 100)
+            gy = random.randint(-100, 100)
+            if not any(item.grid_pos == (gx, gy) for item in self.chapter.items):
+                self.chapter.items.append(ItemPickup((gx, gy), "Random Item", "Vat pham ngau nhien", "heal", amount=10, color=YELLOW))
         if self.player.health <= 0:
             self.end_reason = "Ban da bi zombie ap dao truoc khi thoat duoc khoi thanh pho."
             self.state = "lose"
+
+    def spawn_dynamic_enemies_infinite(self):
+        import random
+        now = pygame.time.get_ticks()
+        alive = [entry for entry in self.story_enemies if not entry.enemy.is_dead]
+        if len(alive) >= self.chapter.max_alive_enemies:
+            return
+        if not self.chapter.spawn_pool:
+            return
+        # Enemy spawn ngẫu nhiên trên map lớn
+        px, py = int(self.player.x // TILE_SIZE), int(self.player.y // TILE_SIZE)
+        for _ in range(2):
+            gx = px + random.randint(-40, 40)
+            gy = py + random.randint(-40, 40)
+            if abs(gx - px) + abs(gy - py) < 10:
+                continue
+            enemy_cls = random.choice(self.chapter.spawn_pool)
+            ex = gx * TILE_SIZE + TILE_SIZE // 2
+            ey = gy * TILE_SIZE + TILE_SIZE // 2
+            enemy = enemy_cls(ex, ey)
+            enemy.obstacle_map = self.build_obstacle_grid()
+            archetype = "basic"
+            self.story_enemies.append(StoryEnemy(enemy, archetype, (gx, gy)))
 
     def update_frenzy(self, shot_fired):
         now = pygame.time.get_ticks()
@@ -1166,6 +1304,8 @@ class Game:
     def draw_world(self):
         world_surface = pygame.Surface((MAP_WIDTH, MAP_HEIGHT), pygame.SRCALPHA)
         self.render_world(world_surface)
+        # Vẽ hiệu ứng kỹ năng lên world_surface
+        self.skill_manager.draw(world_surface)
         screen.blit(world_surface, (0, 0))
 
     def render_world(self, surface):
@@ -1264,7 +1404,7 @@ class Game:
         now = pygame.time.get_ticks()
         orbit_x = int(self.player.x - 34 + math.sin(now * 0.004) * 18)
         orbit_y = int(self.player.y + 22 + math.cos(now * 0.003) * 12)
-        pet = PET_BIRD if self.chapter.id in {"roof", "office"} else PET_FOX if self.chapter.id == "medical" else PET_RACOON
+        pet = self.current_pet
         surface.blit(pet, pet.get_rect(center=(orbit_x, orbit_y)))
         surface.blit(PET_POWER, PET_POWER.get_rect(center=(orbit_x + 10, orbit_y - 12)))
 
@@ -1304,7 +1444,7 @@ class Game:
         pygame.draw.line(screen, self.chapter.chapter_color, (MAP_WIDTH + 1, 0), (MAP_WIDTH + 1, SCREEN_HEIGHT), 3)
 
         header_rect = pygame.Rect(MAP_WIDTH + 14, 14, SIDEBAR_WIDTH - 28, 84)
-        self.draw_card(header_rect, self.chapter.chapter_color, title="Last Roof", subtitle=self.chapter.title)
+        self.draw_card(header_rect, self.chapter.chapter_color, title="San Thuong Cuoi", subtitle=self.chapter.title)
 
         stat_rect = pygame.Rect(MAP_WIDTH + 14, 108, SIDEBAR_WIDTH - 28, 98)
         self.draw_card(stat_rect, RED)
@@ -1317,27 +1457,27 @@ class Game:
         screen.blit(self.font_small.render(self.weapon_manager.current_weapon.name, True, WHITE), (stat_rect.x + 16, stat_rect.y + 72))
 
         objective_rect = pygame.Rect(MAP_WIDTH + 14, 216, SIDEBAR_WIDTH - 28, 86)
-        self.draw_card(objective_rect, YELLOW, title=f"Gợi ý: {self.hint_modes[self.hint_mode_index]}", subtitle=self.objective_label())
+        self.draw_card(objective_rect, YELLOW, title=f"Goi y: {self.hint_modes[self.hint_mode_index]}", subtitle=self.objective_label())
 
         minimap_frame = pygame.Rect(MAP_WIDTH + 14, 312, SIDEBAR_WIDTH - 28, 214)
-        self.draw_card(minimap_frame, self.chapter.chapter_color, title="Minimap", subtitle="Mục tiêu và đường đi")
+        self.draw_card(minimap_frame, self.chapter.chapter_color, title="Minimap", subtitle="Muc tieu va duong di")
         minimap_rect = pygame.Rect(minimap_frame.x + 12, minimap_frame.y + 44, minimap_frame.width - 24, 152)
         self.draw_minimap(minimap_rect)
 
         info_rect = pygame.Rect(MAP_WIDTH + 14, 536, SIDEBAR_WIDTH - 28, 86)
-        self.draw_card(info_rect, CYAN, title="Thông tin", subtitle=f"Zombie: {self.kill_count}  |  NPC: {self.saved_npcs}")
+        self.draw_card(info_rect, CYAN, title="Thong tin", subtitle=f"Zombie: {self.kill_count}  |  NPC: {self.saved_npcs}")
         y = info_rect.y + 48
         stats = [
-            "Chuột trái bắn  |  E nhặt",
-            "Q đổi súng  |  ENTER qua màn",
-            f"Thuật toán: {self.hint_modes[self.hint_mode_index]}",
+            "Chuot trai ban  |  E nhat",
+            "Q doi sung  |  ENTER qua man",
+            f"Thuat toan: {self.hint_modes[self.hint_mode_index]}",
         ]
         for line in stats:
             screen.blit(self.font_small.render(line, True, SOFT), (info_rect.x + 14, y))
             y += 18
 
         asset_rect = pygame.Rect(MAP_WIDTH + 14, 632, SIDEBAR_WIDTH - 28, 160)
-        self.draw_card(asset_rect, ORANGE, title="Loadout & Hỗ trợ", subtitle="Card asset đang dùng")
+        self.draw_card(asset_rect, ORANGE, title="Loadout & Ho tro", subtitle="Card asset dang dung")
         cards = [self.current_weapon_card(), CARD_PET_BIRD, CARD_PET_FOX, CARD_BUILD_MORTAR if self.chapter.id != "ground" else CARD_BUILD_CANNON]
         cx = asset_rect.x + 12
         for card in cards:
@@ -1720,6 +1860,24 @@ class Game:
                     self.weapon_manager.current_weapon = self.weapon_manager.weapons[2]
                     self.popup = f"Da chuyen sang {self.weapon_manager.current_weapon.name}"
                     self.popup_timer = pygame.time.get_ticks() + 1200
+            # --- Phím kỹ năng ---
+            elif event.key == pygame.K_4:
+                # Dùng kỹ năng 1
+                mx, my = pygame.mouse.get_pos()
+                self.skill_manager.use_skill(0, self.player.x, self.player.y, mx, my)
+                self.popup = f"Dùng kỹ năng: {self.skill_manager.skills[0].name}" if len(self.skill_manager.skills) > 0 else ""
+                self.popup_timer = pygame.time.get_ticks() + 1000
+            elif event.key == pygame.K_5:
+                mx, my = pygame.mouse.get_pos()
+                self.skill_manager.use_skill(1, self.player.x, self.player.y, mx, my)
+                self.popup = f"Dùng kỹ năng: {self.skill_manager.skills[1].name}" if len(self.skill_manager.skills) > 1 else ""
+                self.popup_timer = pygame.time.get_ticks() + 1000
+            elif event.key == pygame.K_6:
+                mx, my = pygame.mouse.get_pos()
+                self.skill_manager.use_skill(2, self.player.x, self.player.y, mx, my)
+                self.popup = f"Dùng kỹ năng: {self.skill_manager.skills[2].name}" if len(self.skill_manager.skills) > 2 else ""
+                self.popup_timer = pygame.time.get_ticks() + 1000
+            # ---
             elif event.key == pygame.K_TAB:
                 self.hint_mode_index = (self.hint_mode_index + 1) % len(self.hint_modes)
             elif event.key == pygame.K_m:
