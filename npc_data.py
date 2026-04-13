@@ -19,6 +19,7 @@ NPC_POOL = [
         ],
         "reward": "radio",
         "hint": "Đi về phía bắc để tìm điểm di tản.",
+        "sprite_path": "Sprites/Sprites_NPC/pilot.png",
     },
     {
         "name": "Bảo vệ Nam",
@@ -30,6 +31,7 @@ NPC_POOL = [
         ],
         "reward": "map",
         "hint": "Thẻ từ ở khu kỹ thuật.",
+        "sprite_path": "Sprites/Sprites_NPC/guard.png",
     },
     {
         "name": "Y tá Linh",
@@ -41,6 +43,7 @@ NPC_POOL = [
         ],
         "reward": "medkit",
         "hint": "Kho thuốc ở tầng 2.",
+        "sprite_path": "Sprites/Sprites_NPC/medic.png",
     },
     {
         "name": "Kỹ thuật viên Huy",
@@ -52,6 +55,7 @@ NPC_POOL = [
         ],
         "reward": "shortcut",
         "hint": "Cầu chì mở cổng sân.",
+        "sprite_path": "Sprites/Sprites_NPC/engineer.png",
     },
     {
         "name": "Cô gái tên Vy",
@@ -63,6 +67,7 @@ NPC_POOL = [
         ],
         "reward": None,
         "hint": "Đường ngầm phía tây.",
+        "sprite_path": "Sprites/Sprites_NPC/survivor_f.png",
     },
     {
         "name": "Binh sĩ Khoa",
@@ -74,6 +79,7 @@ NPC_POOL = [
         ],
         "reward": "ammo",
         "hint": "Đạn ở hành lang C.",
+        "sprite_path": "Sprites/Sprites_NPC/soldier.png",
     },
     {
         "name": "Bác sĩ Hòa",
@@ -85,6 +91,7 @@ NPC_POOL = [
         ],
         "reward": "medkit",
         "hint": "Giữ HP cao, tránh bị cắn.",
+        "sprite_path": "Sprites/Sprites_NPC/doctor.png",
     },
     {
         "name": "Ông già Phước",
@@ -96,6 +103,7 @@ NPC_POOL = [
         ],
         "reward": "shortcut",
         "hint": "Mã cửa tầng hầm: 4821.",
+        "sprite_path": "Sprites/Sprites_NPC/elder.png",
     },
     {
         "name": "Nhà báo Lan",
@@ -107,6 +115,7 @@ NPC_POOL = [
         ],
         "reward": None,
         "hint": "Nguồn gốc virus: khu thí nghiệm phía đông.",
+        "sprite_path": "Sprites/Sprites_NPC/journalist.png",
     },
     {
         "name": "Trẻ em tên Bin",
@@ -118,6 +127,7 @@ NPC_POOL = [
         ],
         "reward": None,
         "hint": "Ai đó cần giúp đỡ ở tầng 3.",
+        "sprite_path": "Sprites/Sprites_NPC/child.png",
     },
 ]
 
