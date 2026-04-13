@@ -129,6 +129,30 @@ NPC_POOL = [
         "hint": "Ai đó cần giúp đỡ ở tầng 3.",
         "sprite_path": "Sprites/Sprites_NPC/child.png",
     },
+    {
+        "name": "Thợ máy Dũng",
+        "portrait_color": (220, 160, 90),
+        "portrait_type": "engineer",
+        "lines": [
+            "Tầng hầm có máy phát dự phòng, nhưng cửa phòng máy bị khóa.",
+            "Nếu cậu bật được nguồn, thang kỹ thuật sẽ mở ra một lối tắt.",
+        ],
+        "reward": "shortcut",
+        "hint": "Máy phát ở tầng hầm.",
+        "sprite_path": "Sprites/Sprites_NPC/engineer.png",
+    },
+    {
+        "name": "Nhà nghiên cứu An",
+        "portrait_color": (120, 220, 255),
+        "portrait_type": "doctor",
+        "lines": [
+            "Virus xuất phát từ phòng thí nghiệm. Có mẫu kháng thể trong kho lạnh.",
+            "Mang nó ra ngoài — đừng để rơi vào tay zombie đột biến.",
+        ],
+        "reward": "medkit",
+        "hint": "Kho lạnh ở phòng thí nghiệm.",
+        "sprite_path": "Sprites/Sprites_NPC/doctor.png",
+    },
 ]
 
 # ---------------------------------------------------------------------------

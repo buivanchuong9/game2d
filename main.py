@@ -14,6 +14,7 @@ import random
 import sys
 import glob
 from dataclasses import dataclass, field
+from armory_data import ARMORY, RARITY_COLORS
 
 # Định nghĩa các màu cơ bản
 BLACK = (0, 0, 0)
@@ -33,7 +34,8 @@ SCREEN_WIDTH = 1200
 SCREEN_HEIGHT = 800
 MAP_WIDTH = SCREEN_WIDTH - SIDEBAR_WIDTH
 MAP_HEIGHT = SCREEN_HEIGHT
-screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+# Fullscreen + scaled rendering (keeps internal resolution stable)
+screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SCALED | pygame.FULLSCREEN)
 pygame.display.set_caption("Last Roof: Escape City")
 clock = pygame.time.Clock()
 
@@ -71,18 +73,55 @@ for path in glob.glob("Shop_Cards/*.png"):
     except Exception as e:
         print(f"[SHOP CARD LOAD ERROR] {path}: {e}")
 
-# Tự động load toàn bộ sound
+# Tự động load toàn bộ sound (recursive)
 SOUND_EFFECTS = {}
-for path in glob.glob("Sounds/*.mp3"):
+SOUND_BY_BASENAME = {}
+for path in glob.glob("Sounds/**/*.*", recursive=True):
     try:
+        if not path.lower().endswith((".mp3", ".wav", ".ogg")):
+            continue
         SOUND_EFFECTS[path] = pygame.mixer.Sound(path)
+        SOUND_BY_BASENAME[os.path.basename(path).lower()] = SOUND_EFFECTS[path]
     except Exception as e:
         print(f"[SOUND LOAD ERROR] {path}: {e}")
+
+SOUND_EXTS = (".mp3", ".wav", ".ogg")
+
+# Mapping key -> candidate base filenames (WITHOUT extension).
+# Game will try base + .mp3/.wav/.ogg, plus legacy names.
+SOUND_CANDIDATES: dict[str, list[str]] = {
+    # Weapons (new Vietnamese names)
+    "sfx_shot_rifle": ["ban_sung_truong", "sfx_gun_shot"],
+    "sfx_shot_smg": ["ban_tieu_lien"],
+    "sfx_shot_shotgun": ["ban_shotgun"],
+    "sfx_shot_sniper": ["ban_tia"],
+    "sfx_shot_rocket": ["ban_b40"],
+    "sfx_shot_melee": ["chem"],
+
+    "sfx_reload_rifle": ["thay_dan_sung_truong", "sfx_reload"],
+    "sfx_reload_smg": ["thay_dan_tieu_lien", "sfx_reload"],
+    "sfx_reload_shotgun": ["thay_dan_shotgun", "sfx_reload"],
+    "sfx_reload_sniper": ["thay_dan_tia", "sfx_reload"],
+    "sfx_reload_rocket": ["thay_dan_b40", "sfx_reload"],
+
+    # Combat/UI
+    "sfx_enemy_hit": ["zombie_trung_dan", "sfx_enemy_hit"],
+    "sfx_enemy_death": ["zombie_chet", "sfx_enemy_death"],
+    "sfx_player_hit": ["nhan_vat_trung_don", "sfx_player_hit"],
+
+    "sfx_gate_open": ["mo_cong", "sfx_gate_open"],
+    "sfx_item_drop": ["roi_vat_pham", "sfx_item_drop"],
+    "sfx_quest_complete": ["hoan_thanh_nhiem_vu", "sfx_quest_complete"],
+}
 
 # Hàm phát nhạc nền
 def play_bg_music():
     try:
-        pygame.mixer.music.load("Sounds/Game_loop_music.mp3")
+        # Prefer managed music folder if present
+        if os.path.exists("Sounds/nhac_nen_chinh.mp3"):
+            pygame.mixer.music.load("Sounds/nhac_nen_chinh.mp3")
+        else:
+            pygame.mixer.music.load("Sounds/Game_loop_music.mp3")
         pygame.mixer.music.play(-1)
     except Exception as e:
         print(f"[MUSIC ERROR] {e}")
@@ -96,10 +135,35 @@ def get_random_shop_card():
 
 # Hàm phát hiệu ứng âm thanh
 def play_sound_effect(name):
-    for path, snd in SOUND_EFFECTS.items():
-        if name.lower() in path.lower():
+    # 1) If exact filename was passed, try it
+    key = (name or "").strip()
+    if not key:
+        return
+
+    # 2) Resolve key -> candidate basenames (no extension)
+    bases = SOUND_CANDIDATES.get(key)
+    candidates: list[str] = []
+    if bases:
+        for base in bases:
+            for ext in SOUND_EXTS:
+                candidates.append(f"{base}{ext}")
+    else:
+        # If caller passed a filename, also try other extensions
+        lower = key.lower()
+        candidates.append(lower)
+        root, dot, ext = lower.rpartition(".")
+        if dot and ext:
+            for e in SOUND_EXTS:
+                candidates.append(f"{root}{e}")
+        else:
+            for e in SOUND_EXTS:
+                candidates.append(f"{lower}{e}")
+
+    for fname in candidates:
+        snd = SOUND_BY_BASENAME.get(fname.lower())
+        if snd:
             snd.play()
-            break
+            return
 
 # Hàm lấy pet/card/weapon ngẫu nhiên (ví dụ)
 def get_random_pet_card():
@@ -187,12 +251,133 @@ CHAPTER_TILES = {
         "floor2": safe_load("Sprites/Sprites_Environment/lobby_tile2.png", (TILE_SIZE, TILE_SIZE)),
         "wall": safe_load("Sprites/Sprites_Environment/lobby_wall.png", (TILE_SIZE, TILE_SIZE)),
     },
+    # New chapters reuse existing tile sets to keep visuals consistent
+    "basement": {
+        "floor1": safe_load("Sprites/Sprites_Environment/lobby_tile.png", (TILE_SIZE, TILE_SIZE)),
+        "floor2": safe_load("Sprites/Sprites_Environment/lobby_tile2.png", (TILE_SIZE, TILE_SIZE)),
+        "wall": safe_load("Sprites/Sprites_Environment/lobby_wall.png", (TILE_SIZE, TILE_SIZE)),
+    },
+    "lab": {
+        "floor1": safe_load("Sprites/Sprites_Environment/medical_tile.png", (TILE_SIZE, TILE_SIZE)),
+        "floor2": safe_load("Sprites/Sprites_Environment/medical_tile2.png", (TILE_SIZE, TILE_SIZE)),
+        "wall": safe_load("Sprites/Sprites_Environment/medical_wall.png", (TILE_SIZE, TILE_SIZE)),
+    },
     "escape": {
         "floor1": safe_load("Sprites/Sprites_Environment/heli_tile.png", (TILE_SIZE, TILE_SIZE)),
         "floor2": safe_load("Sprites/Sprites_Environment/heli_tile2.png", (TILE_SIZE, TILE_SIZE)),
         "wall": safe_load("Sprites/Sprites_Environment/heli_wall.png", (TILE_SIZE, TILE_SIZE)),
     }
 }
+
+# ---------------------------------------------------------------------------
+# Chapter props (foreground objects) — drawn instead of generic "wall blocks"
+# ---------------------------------------------------------------------------
+
+PROPS = {
+    # Rooftop
+    "roof_vent": safe_load("Sprites/Sprites_Environment/props/roof_vent_32.png", (32, 32)),
+    "roof_ac": safe_load("Sprites/Sprites_Environment/props/roof_ac_48.png", (48, 48)),
+    "roof_water_tank": safe_load("Sprites/Sprites_Environment/props/roof_water_tank_64.png", (64, 64)),
+    "roof_stairwell": safe_load("Sprites/Sprites_Environment/props/roof_stairwell_64.png", (64, 64)),
+    "roof_sat_dish": safe_load("Sprites/Sprites_Environment/props/roof_satdish_48.png", (48, 48)),
+
+    # Office
+    "office_desk": safe_load("Sprites/Sprites_Environment/props/office_desk_48.png", (48, 48)),
+    "office_table": safe_load("Sprites/Sprites_Environment/props/office_table_64.png", (64, 64)),
+    "office_cabinet": safe_load("Sprites/Sprites_Environment/props/office_cabinet_48.png", (48, 48)),
+    "office_glass": safe_load("Sprites/Sprites_Environment/props/office_glasswall_64.png", (64, 64)),
+
+    # Medical
+    "medical_bed": safe_load("Sprites/Sprites_Environment/props/medical_bed_64.png", (64, 64)),
+    "medical_cabinet": safe_load("Sprites/Sprites_Environment/props/medical_cabinet_48.png", (48, 48)),
+    "medical_trolley": safe_load("Sprites/Sprites_Environment/props/medical_trolley_48.png", (48, 48)),
+
+    # Basement
+    "basement_generator": safe_load("Sprites/Sprites_Environment/props/basement_generator_64.png", (64, 64)),
+    "basement_pipes": safe_load("Sprites/Sprites_Environment/props/basement_pipes_64.png", (64, 64)),
+    "basement_crates": safe_load("Sprites/Sprites_Environment/props/basement_crates_48.png", (48, 48)),
+    "basement_panel": safe_load("Sprites/Sprites_Environment/props/basement_panel_48.png", (48, 48)),
+
+    # Lab
+    "lab_freezer": safe_load("Sprites/Sprites_Environment/props/lab_freezer_64.png", (64, 64)),
+    "lab_console": safe_load("Sprites/Sprites_Environment/props/lab_console_64.png", (64, 64)),
+    "lab_bench": safe_load("Sprites/Sprites_Environment/props/lab_bench_64.png", (64, 64)),
+    "lab_tubes": safe_load("Sprites/Sprites_Environment/props/lab_tubes_48.png", (48, 48)),
+
+    # Gates
+    "gate_closed": safe_load("Sprites/Sprites_Environment/props/gate_closed_64.png", (64, 64)),
+    "gate_open": safe_load("Sprites/Sprites_Environment/props/gate_open_64.png", (64, 64)),
+}
+
+def draw_prop(surface, prop_key: str, sx: int, sy: int):
+    spr = PROPS.get(prop_key)
+    if spr is None:
+        return
+    # Most props are taller than a tile; anchor them to tile bottom
+    surface.blit(spr, (sx, sy + TILE_SIZE - spr.get_height()))
+
+
+def obstacle_prop_for_tile(chapter_id: str, tx: int, ty: int) -> str | None:
+    """Pick a context prop sprite to visually represent a blocked tile.
+
+    Deterministic by coordinates so the look stays stable per map.
+    """
+    # Border walls are kept visually subtle to avoid clutter
+    if tx in (0, GRID_SIZE - 1) or ty in (0, GRID_SIZE - 1):
+        return None
+
+    # Stable pseudo-rng per tile
+    r = (tx * 73856093) ^ (ty * 19349663) ^ (hash(chapter_id) & 0xFFFFFFFF)
+    roll = r % 100
+
+    if chapter_id == "roof":
+        # Rooftop: vents/AC units block movement
+        if roll < 55:
+            return "roof_vent"
+        if roll < 85:
+            return "roof_ac"
+        return "roof_sat_dish"
+
+    if chapter_id == "office":
+        # Office: desks/cabinets/glass partitions
+        if roll < 45:
+            return "office_desk"
+        if roll < 70:
+            return "office_cabinet"
+        if roll < 92:
+            return "office_glass"
+        return "office_table"
+
+    if chapter_id == "medical":
+        # Medical: beds/cabinets/trolleys
+        if roll < 55:
+            return "medical_bed"
+        if roll < 85:
+            return "medical_cabinet"
+        return "medical_trolley"
+
+    if chapter_id == "basement":
+        # Basement: crates/pipes/generator parts
+        if roll < 45:
+            return "basement_crates"
+        if roll < 75:
+            return "basement_pipes"
+        if roll < 92:
+            return "basement_panel"
+        return "basement_generator"
+
+    if chapter_id == "lab":
+        # Lab: benches/freezers/consoles/tube racks
+        if roll < 38:
+            return "lab_bench"
+        if roll < 65:
+            return "lab_freezer"
+        if roll < 88:
+            return "lab_console"
+        return "lab_tubes"
+
+    # Fallback: no obstacle sprite
+    return None
 TANK_BASE = safe_load("Sprites/Sprites_Building/Towers bases/Tower 06.png", (52, 52))
 TANK_TURRET = safe_load("Sprites/Sprites_Building/RocketLauncher.png", (52, 52))
 ROCKET_PICKUP = safe_load("Sprites/Sprites_Weapon/RPG-reisized.png", (34, 34))
@@ -203,6 +388,12 @@ SNIPER_PICKUP = safe_load("Sprites/Sprites_Weapon/Sniper-rifle-2-scoped.png", (5
 CARD_WEAPON_BASIC = safe_load("Shop_Cards/Card_Weapon_AssaultRifle.png", (72, 96))
 CARD_WEAPON_SHOTGUN = safe_load("Shop_Cards/Card_Weapon_Shotgun.png", (72, 96))
 CARD_WEAPON_ROCKET = safe_load("Shop_Cards/Card_Building_RocketLauncher.png", (72, 96))
+CARD_WEAPON_PISTOL = safe_load("Shop_Cards/Card_Weapon_Pistol.png", (72, 96))
+CARD_WEAPON_MINIGUN = safe_load("Shop_Cards/Card_Weapon_Minigun.png", (72, 96))
+CARD_WEAPON_FLAMETHROWER = safe_load("Shop_Cards/Card_Weapon_FlameThrower.png", (72, 96))
+CARD_WEAPON_GRENADE = safe_load("Shop_Cards/Card_Weapon_GrenadeLauncher.png", (72, 96))
+CARD_WEAPON_POISON = safe_load("Shop_Cards/Card_Weapon_PoisonGun.png", (72, 96))
+CARD_WEAPON_TAESAR = safe_load("Shop_Cards/Card_Weapon_Taesar_Gun.png", (72, 96))
 CARD_BORDER = safe_load("Shop_Cards/Card_Border_1.png", (78, 102))
 CARD_PET_BIRD = safe_load("Shop_Cards/Card_Pet_BlueBird.png", (58, 78))
 CARD_PET_FOX = safe_load("Shop_Cards/Card_Pet_Fox.png", (58, 78))
@@ -277,15 +468,30 @@ WEAPON_DROP_POOL = [
     },
 ]
 
+# Extend with big generated armory
+for w in ARMORY:
+    # Normalize shape for WeaponManager.unlock_weapon
+    data = dict(w)
+    if data.get("type") == "melee" or data.get("type_hint") == "melee":
+        data["type"] = "melee"
+    WEAPON_DROP_POOL.append(data)
+
 ITEM_SURFACES = {
-    "heal": safe_load("Sprites/Sprites_Weapon/Grenade-2.png", (24, 24)), # Use grenade as medkit icon for now or another
+    "heal": safe_load("Sprites/Sprites_Weapon/Grenade-2.png", (24, 24)), # TODO: replace with medkit sprite
     "armor": safe_load("Sprites/Sprites_Effect/Pet_Power.png", (24, 24)),
     "ammo": safe_load("Sprites/Sprites_Weapon/Amo1.png", (20, 20)),
     "weapon": safe_load("Sprites/Sprites_Weapon/Shotgun-4.png", (34, 24)),
     "rocket_weapon": safe_load("Sprites/Sprites_Weapon/RPG-reisized.png", (38, 38)),
-    "gate": safe_load("Sprites/Sprites_Weapon/Amo6.png", (24, 24)),
-    "signal": safe_load("Sprites/Sprites_Weapon/AmoB1.png", (24, 24)),
+    # Mission items (clear icons)
+    "keycard": safe_load("Sprites/Sprites_Environment/items/keycard_24.png", (24, 24)),
+    "power": safe_load("Sprites/Sprites_Environment/items/fuse_24.png", (24, 24)),
+    "code": safe_load("Sprites/Sprites_Environment/items/codebook_24.png", (24, 24)),
+    "antidote": safe_load("Sprites/Sprites_Environment/items/antidote_24.png", (24, 24)),
+    "exit_key": safe_load("Sprites/Sprites_Environment/items/exit_key_24.png", (24, 24)),
+    "gate": safe_load("Sprites/Sprites_Environment/items/gate_switch_24.png", (24, 24)),
+    "signal": safe_load("Sprites/Sprites_Environment/items/beacon_24.png", (24, 24)),
     "flare": safe_load("Sprites/Sprites_Weapon/Grenade-1.png", (24, 24)),
+    "money": safe_load("Sprites/Sprites_Environment/items/money_24.png", (24, 24)),
 }
 
 
@@ -323,6 +529,7 @@ class NPC:
     interacted: bool = False
     portrait_color: tuple[int, int, int] = CYAN
     sprite_path: str = None
+    quest: str | None = None
 
 
 @dataclass
@@ -341,6 +548,7 @@ class Chapter:
     enemy_plan: list[tuple[type, tuple[int, int], str]]
     chapter_color: tuple[int, int, int]
     radio_message: str
+    quest_line: str = ""
     holdout_seconds: int = 0
     chapter_type: str = "explore"
     spawn_pool: list[type] = field(default_factory=list)
@@ -354,6 +562,8 @@ class StoryEnemy:
         self.archetype = archetype
         self.grid_pos = grid_pos
         self.dead_registered = False
+        self._last_health = getattr(enemy, "health", 0)
+        self._last_hit_sfx_at = 0
 
     @property
     def is_dead(self):
@@ -405,6 +615,7 @@ class MissionTracker:
     def __init__(self, chapter):
         self.chapter = chapter
         self.data = {
+            "stage": 0,
             "weapon_collected": False,
             "medkit_collected": False,
             "keycard_collected": False,
@@ -423,41 +634,82 @@ class MissionTracker:
     def objectives(self):
         cid = self.chapter.id
         d = self.data
+        s = int(d.get("stage", 0) or 0)
         if cid == "roof":
-            return [
-                ("Nhat vu khi co ban", d["weapon_collected"]),
-                ("Tieu diet zombie dau tien", d["zombies_killed"] >= 1),
-                ("San sang vao man choi chinh", d["weapon_collected"] and d["zombies_killed"] >= 1),
+            steps = [
+                ("Nhặt vũ khí cơ bản", d["weapon_collected"]),
+                ("Hạ 1 zombie", d["zombies_killed"] >= 1),
+                ("Tới cổng để xuống tầng 3", d.get("gate_opened", False)),
             ]
+            return [steps[min(s, len(steps) - 1)]]
         if cid == "office":
-            return [
-                ("Tim the tu cua bao ve", d["keycard_collected"]),
-                ("Khoi phuc dien hanh lang", d["power_restored"]),
-                ("Gap NPC bao ve", d["npc_saved"] >= 1),
-                ("Toi cau thang xuong tang 2", d["gate_opened"]),
+            steps = [
+                ("Hạ đủ 10 zombie (0/10)", d["zombies_killed"] >= 10),
+                ("Nhặt Keycard", d["keycard_collected"]),
+                ("Nhặt cầu chì (Fuse)", d.get("fuse_collected", False)),
+                ("Bật điện ở hộp điện", d["power_restored"]),
+                ("Tới cổng để xuống tầng 2", d["gate_opened"]),
             ]
+            # patch dynamic text for step 0
+            if s == 0:
+                k = min(int(d.get("zombies_killed", 0) or 0), 10)
+                return [(f"Hạ đủ 10 zombie ({k}/10)", d["zombies_killed"] >= 10)]
+            return [steps[min(s, len(steps) - 1)]]
         if cid == "medical":
-            return [
-                ("Thu thap kho thuoc", d["supply_cache"]),
-                ("Ha zombie dac biet", d["special_kills"] >= 3),
-                ("Ho tro y ta song sot", d["npc_saved"] >= 1),
-                ("Mo duong xuong tang 1", d["gate_opened"]),
+            steps = [
+                ("Nhặt vật tư y tế", d["supply_cache"]),
+                ("Hạ 3 zombie đặc biệt", d["special_kills"] >= 3),
+                ("Nhặt thiết bị mở cổng (Control Fuse)", d.get("control_fuse_collected", False)),
+                ("Kích hoạt hộp điện để mở cổng", d["gate_opened"]),
             ]
+            return [steps[min(s, len(steps) - 1)]]
+        if cid == "basement":
+            steps = [
+                ("Nhặt sổ tay mã cửa (4821)", d.get("basement_code", False)),
+                ("Hạ 2 zombie đặc biệt", d["special_kills"] >= 2),
+                ("Bật máy phát (hộp điện)", d["power_restored"]),
+                ("Tới cổng để vào phòng thí nghiệm", d["gate_opened"]),
+            ]
+            return [steps[min(s, len(steps) - 1)]]
+        if cid == "lab":
+            steps = [
+                ("Hạ 1 zombie đặc biệt để rơi mẫu", d["special_kills"] >= 1),
+                ("Nhặt mẫu kháng thể", d.get("antidote_collected", False)),
+                ("Nhặt thẻ từ an ninh", d["keycard_collected"]),
+                ("Mở cửa an ninh (console)", d["gate_opened"]),
+            ]
+            return [steps[min(s, len(steps) - 1)]]
         if cid == "escape":
-            return [
-                ("Ha boss Old Guardian", d["boss_down"]),
-                ("Cho truc thang den (1 phut)", d.get("helicopter_arrived", False)),
-                ("Len truc thang de thoat", False)
+            steps = [
+                ("Hạ boss Old Guardian", d["boss_down"]),
+                ("Chờ trực thăng đến", d.get("helicopter_arrived", False)),
+                ("Tới điểm trực thăng để thoát", d.get("extracted", False)),
             ]
+            return [steps[min(s, len(steps) - 1)]]
         return [
-            ("Mo cong ra san", d["gate_opened"]),
-            ("Kich hoat tin hieu cuu ho", d["signal_started"]),
-            ("Tru vung toi khi truc thang toi", d["holdout_complete"]),
-            ("Ha boss dot bien", d["boss_down"]),
+            # ground
+            ("Mở cổng ra sân", d["gate_opened"]),
         ]
 
     def complete(self):
-        return all(done for _, done in self.objectives())
+        cid = self.chapter.id
+        d = self.data
+        s = int(d.get("stage", 0) or 0)
+        if cid == "roof":
+            # Chapter 1 should never get stuck: as soon as you pick weapon + kill 1, gate can open.
+            return bool(d.get("weapon_collected", False)) and int(d.get("zombies_killed", 0) or 0) >= 1
+        if cid == "office":
+            return s >= 4 and bool(d.get("gate_opened", False))
+        if cid == "medical":
+            return s >= 3 and bool(d.get("gate_opened", False))
+        if cid == "basement":
+            return s >= 3 and bool(d.get("gate_opened", False))
+        if cid == "lab":
+            return s >= 3 and bool(d.get("gate_opened", False))
+        if cid == "escape":
+            return bool(d.get("extracted", False))
+        # ground
+        return bool(d.get("holdout_complete", False))
 
 
 from camera import Camera
@@ -473,6 +725,30 @@ class Game:
         self.camera = Camera(SCREEN_WIDTH, SCREEN_HEIGHT, SIDEBAR_WIDTH)
         self.player = Player(400, 400)
         self.weapon_manager = WeaponManager()
+        # Wire weapon SFX events (shot/reload)
+        def _weapon_event(evt, weapon):
+            wname = (getattr(weapon, "name", "") or "").lower()
+            is_melee = bool(getattr(weapon, "melee", False))
+
+            # classify weapon
+            if is_melee or "katana" in wname or "knife" in wname:
+                wtype = "melee"
+            elif "shotgun" in wname:
+                wtype = "shotgun"
+            elif "sniper" in wname:
+                wtype = "sniper"
+            elif "smg" in wname:
+                wtype = "smg"
+            elif "rocket" in wname or "rpg" in wname or "b40" in wname:
+                wtype = "rocket"
+            else:
+                wtype = "rifle"
+
+            if evt == "shot":
+                play_sound_effect(f"sfx_shot_{wtype}")
+            elif evt in {"reload_start", "reload_complete"}:
+                play_sound_effect(f"sfx_reload_{wtype}")
+        self.weapon_manager.on_event = _weapon_event
         self.story_flags = set()
         self.last_hint_path = []
         self.last_spawn_at = 0
@@ -480,7 +756,19 @@ class Game:
         self.frenzy_window_until = 0
         self.kill_count = 0
         self.saved_npcs = 0
+        self.money = 0
+        # Finite wave per chapter (no infinite spawning)
+        self.enemy_target_per_chapter = [10, 20, 30, 40, 50, 60, 70]
+        self.enemies_remaining_to_spawn = 0
+        self.enemies_initial_count = 0
+        # Dialogue UI (Genshin-like)
+        self.dialog_started_at = 0
+        self.dialog_page_index = 0
+        self.dialog_chars_shown = 0
+        self.dialog_speed_cps = 70  # chars per second
         self.end_reason = ""
+        self._last_player_hp = self.player.health
+        self._last_player_hit_sfx_at = 0
         
         # --- Kỹ năng ---
         self.skill_manager = SkillManager()
@@ -528,6 +816,10 @@ class Game:
         self.kill_count = 0
         self.saved_npcs = 0
         self.next_chapter_ready = False
+        self.exit_unlocked = False
+        self.yard_spawned = False
+        self.yard_enemy_plan = []
+        self.yard_gate_tile = (26, 22)
         self.chapter_index = 0
         self.chapters = self.build_chapters()
         self.chapter = None
@@ -565,21 +857,76 @@ class Game:
                 blocked.add((GRID_SIZE - 1, y))
             return blocked
 
+        def add_rect_walls(blocked: set[tuple[int, int]], x1: int, y1: int, x2: int, y2: int, doors: list[tuple[int, int]] | None = None):
+            """Add rectangle perimeter walls (inclusive)."""
+            for x in range(x1, x2 + 1):
+                blocked.add((x, y1))
+                blocked.add((x, y2))
+            for y in range(y1, y2 + 1):
+                blocked.add((x1, y))
+                blocked.add((x2, y))
+            if doors:
+                for d in doors:
+                    blocked.discard(d)
+
+        def corridor(blocked: set[tuple[int, int]], x1: int, y1: int, x2: int, y2: int, width: int = 3):
+            """Carve a corridor by removing walls in a band (useful after placing big rectangles)."""
+            if x1 == x2:
+                x = x1
+                for y in range(min(y1, y2), max(y1, y2) + 1):
+                    for dx in range(-(width // 2), width // 2 + 1):
+                        blocked.discard((x + dx, y))
+            elif y1 == y2:
+                y = y1
+                for x in range(min(x1, x2), max(x1, x2) + 1):
+                    for dy in range(-(width // 2), width // 2 + 1):
+                        blocked.discard((x, y + dy))
+
+        def add_block_rect(blocked: set[tuple[int, int]], x1: int, y1: int, x2: int, y2: int):
+            """Fill a rectangle area as blocked obstacles."""
+            for x in range(x1, x2 + 1):
+                for y in range(y1, y2 + 1):
+                    blocked.add((x, y))
+
+        def carve(blocked: set[tuple[int, int]], x1: int, y1: int, x2: int, y2: int):
+            """Clear a rectangle area (walkable)."""
+            for x in range(x1, x2 + 1):
+                for y in range(y1, y2 + 1):
+                    blocked.discard((x, y))
+
         roof_blocked = ring_walls()
-        for x in range(8, 35):
-            roof_blocked.add((x, 12))
-        for x in range(10, 26):
-            roof_blocked.add((x, 28))
-        for y in range(12, 29):
-            roof_blocked.add((28, y))
-        for pos in [(14, 12), (22, 28), (28, 20), (35, 34)]:
-            roof_blocked.discard(pos)
+        # Rooftop: open space, obstacle clusters as vents/AC, clear path to exit
+        add_block_rect(roof_blocked, 6, 10, 16, 12)   # vent cluster
+        add_block_rect(roof_blocked, 22, 6, 26, 9)    # AC cluster
+        add_block_rect(roof_blocked, 30, 26, 34, 30)  # water tank zone
+        add_block_rect(roof_blocked, 18, 30, 22, 34)  # debris
+        # carve walkable lanes
+        carve(roof_blocked, 3, 3, 40, 40)
+        roof_blocked |= ring_walls()
+        # keep obstacle islands but ensure corridors
+        carve(roof_blocked, 3, 34, 40, 36)
+        carve(roof_blocked, 4, 4, 10, 10)
+        carve(roof_blocked, 34, 30, 38, 34)
+        roof_decor = {
+            # Rooftop context props
+            (6, 6): "roof_stairwell",
+            (10, 8): "roof_vent",
+            (12, 8): "roof_vent",
+            (20, 6): "roof_ac",
+            (30, 8): "roof_sat_dish",
+            (34, 30): "roof_water_tank",
+            # existing decor
+            (5, 5): "grass",
+            (32, 6): "hut",
+            (25, 33): "rock",
+        }
         roof_items = [
             ItemPickup((6, 7), "Shotgun", "Một khẩu shotgun còn hoạt động.", "weapon", color=ORANGE),
             ItemPickup((10, 31), "Bandage", "Bang gac tu tui cuu ho san thuong.", "heal", amount=25),
         ]
         roof_npcs = [
-            NPC("Phi cong", (38, 5), ["Toi chi lien lac duoc qua bo dam.", "Xuong cac tang duoi, mo cong san va goi tin hieu."], reward="radio", portrait_color=YELLOW, sprite_path="Sprites/Sprites_NPC/pilot.png"),
+            NPC("Phi cong", (38, 5), ["Toi chi lien lac duoc qua bo dam.", "Xuong cac tang duoi, mo cong san va goi tin hieu."], reward="radio", portrait_color=YELLOW, sprite_path="Sprites/Sprites_NPC/pilot.png",
+                quest="Nhat sung + ha 1 zombie -> cong xuong tang se mo"),
         ]
         roof_enemies = [
             (Goblin, (18, 7), "basic"),
@@ -590,22 +937,47 @@ class Game:
         ]
 
         office_blocked = ring_walls()
-        # Chỉ để lại một số vật cản nhỏ ở map office, không tạo tường kín
-        # Ví dụ: chỉ để các vật cản ở góc hoặc một số điểm
-        for pos in [(8, 10), (14, 15), (22, 18), (30, 12), (35, 20), (10, 28), (28, 30)]:
-            office_blocked.add(pos)
+        # Office: readable "plus" corridors + furniture islands (no maze walls)
+        carve(office_blocked, 2, 2, GRID_SIZE - 3, GRID_SIZE - 3)
+        office_blocked |= ring_walls()
+        # Main cross corridors
+        carve(office_blocked, 4, 20, 39, 26)   # horizontal corridor (wide)
+        carve(office_blocked, 18, 4, 26, 39)   # vertical corridor (wide)
+        # Furniture islands (blocked)
+        add_block_rect(office_blocked, 6, 6, 14, 12)
+        add_block_rect(office_blocked, 28, 6, 38, 12)
+        add_block_rect(office_blocked, 6, 30, 14, 36)
+        add_block_rect(office_blocked, 28, 30, 38, 36)
+        add_block_rect(office_blocked, 10, 14, 14, 18)
+        add_block_rect(office_blocked, 30, 14, 34, 18)
+        # Ensure clear approach to exits/objectives
+        carve(office_blocked, 3, 32, 10, 38)  # start lane
+        carve(office_blocked, 34, 32, 41, 38) # exit lane
+        office_decor = {
+            # Office context props: desks, tables, cabinets, glass partitions
+            (8, 7): "office_desk",
+            (14, 8): "office_desk",
+            (28, 8): "office_table",
+            (34, 12): "office_cabinet",
+            (24, 26): "office_glass",
+            (30, 26): "office_glass",
+        }
         office_items = [
-            ItemPickup((8, 6), "Keycard", "The tu mo cua an ninh tang 3.", "keycard", color=BLUE),
             ItemPickup((35, 28), "Fuse", "Cau chi phu cho dien hanh lang.", "power", color=YELLOW),
             ItemPickup((14, 20), "Katana", "Thanh kiem nhat gia: Sac lem va toc do cao.", "weapon", weapon_data={
                 "name": "Katana", "fire_rate": 2.5, "reload_time": 0.0,
-                "image_path": "Sprites/Sprites_Weapon/Sniper-rifle-1.png",
-                "projectile_speed": 0, "damage": 110, "projectile_scale": (48, 48), "type": "melee"
+                "image_path": "Sprites/Sprites_Weapon/Katana.png",
+                "projectile_speed": 0, "damage": 110, "projectile_scale": (96, 96), "type": "melee",
+                "projectile_image": [
+                    {"atlas": "Sprites/Sprites_Effect/Bullets/Introl Green Effect Bullet Impact Explosion 32x32.gif", "tile": (32, 32)},
+                    {"atlas": "Sprites/Sprites_Effect/Bullets/Introl Yellow Effect Bullet Impact Explosion 32x32.gif", "tile": (32, 32)},
+                ],
             }),
             ItemPickup((24, 5), "Ammo", "Dan du tru tu phong nhan su.", "ammo", amount=18, color=WHITE),
         ]
         office_npcs = [
-            NPC("Bao ve Nam", (21, 17), ["Toi giu duoc phong camera nhung cua dang ket.", "Lay the tu, gan cau chi roi mo loi xuong."], reward="map", portrait_color=BLUE, sprite_path="Sprites/Sprites_NPC/guard.png"),
+            NPC("Bao ve Nam", (21, 17), ["Toi giu duoc phong camera nhung cua dang ket.", "Ha zombie dac biet de lay the tu, roi khoi phuc dien de mo loi xuong."], reward="map", portrait_color=BLUE, sprite_path="Sprites/Sprites_NPC/guard.png",
+                quest="Checkpoint: Ha du 10 zombie -> rơi Keycard. Sau do tim cau chi va bat hop dien."),
         ]
         office_enemies = [
             (Goblin, (9, 17), "basic"),
@@ -618,10 +990,29 @@ class Game:
         ]
 
         med_blocked = ring_walls()
-        # Giảm số lượng tường ở màn 3 để dễ di chuyển hơn
-        # Chỉ để một số vật cản nhỏ, không tạo tường kín
-        for pos in [(8, 12), (14, 15), (22, 18), (30, 12), (35, 20), (10, 28), (28, 30), (18, 24), (24, 22), (34, 28)]:
-            med_blocked.add(pos)
+        # Medical: long corridor + wards on sides, fewer tight corners
+        carve(med_blocked, 2, 2, GRID_SIZE - 3, GRID_SIZE - 3)
+        med_blocked |= ring_walls()
+        # Main medical hallway
+        carve(med_blocked, 4, 18, 40, 24)
+        # Ward islands
+        add_block_rect(med_blocked, 6, 6, 16, 14)
+        add_block_rect(med_blocked, 22, 6, 38, 14)
+        add_block_rect(med_blocked, 6, 28, 16, 38)
+        add_block_rect(med_blocked, 22, 28, 38, 38)
+        # service core
+        add_block_rect(med_blocked, 18, 8, 20, 16)
+        add_block_rect(med_blocked, 18, 28, 20, 36)
+        carve(med_blocked, 4, 32, 10, 40)   # start approach
+        carve(med_blocked, 36, 32, 41, 40)  # exit approach
+        med_decor = {
+            # Medical context props
+            (8, 10): "medical_bed",
+            (12, 10): "medical_bed",
+            (28, 8): "medical_cabinet",
+            (30, 8): "medical_cabinet",
+            (18, 26): "medical_trolley",
+        }
         med_items = [
             ItemPickup((6, 6), "Medkit", "Mot hop cuu thuong lon trong phong cap cuu.", "heal", amount=50),
             ItemPickup((19, 20), "Armor Vest", "Ao giap nhe giup giam sat thuong.", "armor", amount=25, color=CYAN),
@@ -630,7 +1021,8 @@ class Game:
             ItemPickup((27, 8), "Rifle Ammo", "Dan hiem cho sung truong.", "ammo", amount=28, color=WHITE),
         ]
         med_npcs = [
-            NPC("Y ta Linh", (18, 7), ["Toi van con giu duoc kho thuoc.", "Neu cau lay duoc nguon dien, toi se chi duong xuong tang 1."], reward="medkit", portrait_color=GREEN, sprite_path="Sprites/Sprites_NPC/medic.png"),
+            NPC("Y ta Linh", (18, 7), ["Toi van con giu duoc kho thuoc.", "Ha 3 zombie dac biet va mo loi xuong tang 1, toi se giup cau."], reward="medkit", portrait_color=GREEN, sprite_path="Sprites/Sprites_NPC/medic.png",
+                quest="Checkpoint: Ha 3 zombie dac biet -> mo duong xuong tang 1."),
         ]
         med_enemies = [
             (Mushroom, (9, 21), "tank"),
@@ -644,22 +1036,28 @@ class Game:
         ]
 
         ground_blocked = ring_walls()
-        for x in range(6, 37):
-            ground_blocked.add((x, 12))
-        for x in range(8, 32):
-            ground_blocked.add((x, 24))
-        for y in range(6, 33):
-            ground_blocked.add((10, y))
-            ground_blocked.add((24, y))
-        for pos in [(10, 18), (24, 8), (24, 29), (18, 12), (30, 12), (16, 24), (30, 24)]:
-            ground_blocked.discard(pos)
+        # Ground: left = lobby/inside, right-bottom = yard; wide lanes
+        carve(ground_blocked, 2, 2, GRID_SIZE - 3, GRID_SIZE - 3)
+        ground_blocked |= ring_walls()
+        # Lobby furniture blocks (inside)
+        add_block_rect(ground_blocked, 6, 8, 16, 10)
+        add_block_rect(ground_blocked, 6, 14, 16, 16)
+        add_block_rect(ground_blocked, 18, 8, 22, 16)
+        carve(ground_blocked, 4, 4, 24, 20)
+        # Yard obstacles (cars/crates)
+        add_block_rect(ground_blocked, 30, 28, 36, 30)
+        add_block_rect(ground_blocked, 28, 34, 34, 36)
+        carve(ground_blocked, 24, 20, 41, 41)
+        # Gate lane from inside to yard
+        carve(ground_blocked, 22, 20, 30, 26)
         ground_items = [
             ItemPickup((7, 7), "Gate Switch", "Cong tac mo cong san.", "gate", color=ORANGE),
             ItemPickup((34, 29), "Signal Beacon", "Thiet bi phat tin hieu cho truc thang.", "signal", color=YELLOW),
             ItemPickup((38, 36), "Rescue Flare", "Phao sang dung de xac nhan vi tri ha canh.", "flare", color=RED),
         ]
         ground_npcs = [
-            NPC("Ky thuat vien Huy", (17, 18), ["Toi giu duoc bo phat o san.", "Mo cong roi bat beacon, toi se cau gio cho cau."], reward="shortcut", portrait_color=ORANGE, sprite_path="Sprites/Sprites_NPC/engineer.png"),
+            NPC("Ky thuat vien Huy", (17, 18), ["Toi giu duoc bo phat o san.", "Mo cong chinh, ra san va bat beacon. Quai ngoai san chi phat hien cau sau khi cong mo."], reward="shortcut", portrait_color=ORANGE, sprite_path="Sprites/Sprites_NPC/engineer.png",
+                quest="Checkpoint: Mo cong chinh -> quái ngoài sân xuất hiện. Bat beacon -> tru vung."),
         ]
         ground_enemies = [
             (Goblin, (18, 6), "basic"),
@@ -672,6 +1070,64 @@ class Game:
             (DashingGoblin, (30, 31), "fast"),
         ]
 
+        basement_blocked = ring_walls()
+        # Basement: trục hành lang trung tâm + các phòng máy/ kho hai bên
+        add_rect_walls(basement_blocked, 3, 3, 40, 40, doors=[(4, 35), (40, 35)])
+        # Ensure player start area is walkable and connected
+        carve(basement_blocked, 2, 33, 8, 39)           # spawn pocket
+        carve(basement_blocked, 8, 33, 14, 35)          # connector to corridor
+        # central hallway rails
+        for x in range(6, 38):
+            basement_blocked.add((x, 20))
+            basement_blocked.add((x, 24))
+        for pos in [(16, 20), (17, 20), (28, 24), (29, 24), (10, 24), (11, 24), (34, 20), (35, 20)]:
+            basement_blocked.discard(pos)
+        # generator room (top-right)
+        add_rect_walls(basement_blocked, 26, 4, 40, 18, doors=[(38, 18), (26, 10)])
+        # storage room (bottom-left)
+        add_rect_walls(basement_blocked, 4, 26, 18, 40, doors=[(18, 33), (10, 26), (4, 35)])
+        # pump room (top-left)
+        add_rect_walls(basement_blocked, 4, 4, 18, 18, doors=[(10, 18), (18, 10)])
+        # Wider connectors so player can pass smoothly
+        corridor(basement_blocked, 10, 18, 10, 26, width=7)
+        corridor(basement_blocked, 18, 33, 26, 33, width=7)
+        # Fix stuck-at-entrance: ensure left entrance and a clear lane inward
+        carve(basement_blocked, 3, 34, 12, 36)
+        carve(basement_blocked, 3, 33, 6, 39)
+        # Widen the main hallway (avoid tiny wall gaps)
+        carve(basement_blocked, 6, 19, 37, 25)
+        # clutter piles
+        for pos in [(8, 30), (9, 30), (8, 31), (30, 10), (31, 10), (32, 10), (14, 10), (14, 11), (15, 11), (34, 16)]:
+            basement_blocked.add(pos)
+        basement_decor = {
+            (36, 8): "basement_panel",
+            (34, 12): "basement_generator",
+            (12, 30): "basement_crates",
+            (30, 18): "basement_pipes",
+        }
+
+        lab_blocked = ring_walls()
+        # Lab: hành lang chữ U + phòng lạnh + phòng điều khiển
+        add_rect_walls(lab_blocked, 3, 3, 40, 40, doors=[(3, 6), (39, 35)])
+        # cold storage (top)
+        add_rect_walls(lab_blocked, 8, 4, 34, 16, doors=[(18, 16), (24, 4)])
+        # research wing (left-bottom)
+        add_rect_walls(lab_blocked, 4, 20, 18, 38, doors=[(18, 30), (10, 20)])
+        # security/control (right-bottom)
+        add_rect_walls(lab_blocked, 22, 22, 40, 38, doors=[(22, 30), (32, 22)])
+        corridor(lab_blocked, 18, 16, 18, 20, width=5)
+        corridor(lab_blocked, 18, 30, 22, 30, width=5)
+        # benches / broken glass spots
+        for pos in [(12, 10), (13, 10), (14, 10), (28, 8), (29, 8), (30, 8), (26, 28), (27, 28), (30, 32), (31, 32), (32, 32)]:
+            lab_blocked.add(pos)
+        lab_decor = {
+            (30, 8): "lab_freezer",
+            (24, 10): "lab_freezer",
+            (12, 26): "lab_bench",
+            (30, 26): "lab_console",
+            (18, 18): "lab_tubes",
+        }
+
         return [
             Chapter(
                 "roof",
@@ -682,12 +1138,13 @@ class Game:
                 (38, 34),
                 (4, 5),
                 roof_blocked,
-                {(5, 5): "grass", (32, 6): "hut", (25, 33): "rock"},
+                roof_decor,
                 roof_items,
                 roof_npcs,
                 roof_enemies,
                 ORANGE,
                 "Phi cong: Neu con nghe thay toi, hay xuong cac tang duoi va mo cong san.",
+                quest_line="Thoat khoi san thuong: nhat sung, ha 1 zombie, mo cong xuong tang 3.",
                 spawn_pool=[],
                 max_alive_enemies=5,
                 spawn_interval_ms=999999,
@@ -701,12 +1158,13 @@ class Game:
                 (37, 35),
                 (3, 34),
                 office_blocked,
-                {(6, 7): "hut", (22, 16): "rock", (34, 29): "grass"},
+                office_decor,
                 office_items,
                 office_npcs,
                 office_enemies,
                 BLUE,
                 "Bao ve Nam: Toi thay cau thang ky thuat o goc dong nam. Nhung phai co dien.",
+                quest_line="Tang 3: ha du 10 zombie lay the tu, khoi phuc dien, mo loi xuong tang 2.",
                 spawn_pool=[Goblin, DashingGoblin, FlyingEye],
                 max_alive_enemies=11,
                 spawn_interval_ms=3200,
@@ -720,19 +1178,88 @@ class Game:
                 (39, 35),
                 (4, 34),
                 med_blocked,
-                {(7, 6): "hut", (27, 8): "rock", (18, 31): "grass"},
+                med_decor,
                 med_items,
                 med_npcs,
                 med_enemies,
                 GREEN,
                 "Y ta Linh: Cong tang 1 chi mo neu cap dien dung tuyen ky thuat.",
+                quest_line="Tang 2: thu thap vat tu, ha 3 zombie dac biet, mo duong xuong tang 1.",
                 spawn_pool=[Goblin, Mushroom, TeleportingMushroom, Skeleton],
                 max_alive_enemies=12,
                 spawn_interval_ms=3000,
             ),
+            # --------- NEW CHAPTER: Basement ----------
+            Chapter(
+                "basement",
+                "Chuong 4: Tang ham",
+                "May phat du phong va cua sat",
+                [
+                    "Khong khi am va mùi dau may xoc thang vao mui.",
+                    "Tieng kim loai keo len lanh song lung — ben duoi co thu gi do dang di chuyen.",
+                ],
+                ["Tim ma cua", "Ha zombie dac biet", "Khoi dong may phat", "Mo cua den phong thi nghiem"],
+                (40, 35),
+                (4, 35),
+                basement_blocked,
+                basement_decor,
+                [
+                    ItemPickup((8, 34), "So tay ky thuat", "Trong so co ma cua phong may: 4821.", "code", color=WHITE),
+                    ItemPickup((36, 8), "Dan du tru", "Hop dan con moi trong tu ky thuat.", "ammo", amount=24, color=WHITE),
+                    ItemPickup((12, 10), "Ao giap", "Ao giap cu nhung van dung duoc.", "armor", amount=20, color=CYAN),
+                ],
+                [
+                    NPC("Tho may Dung", (10, 26), ["May phat o phong may bi khoa ma.", "Tim so tay ky thuat, bat dien len thi cua sat se mo."], reward="shortcut", portrait_color=ORANGE, sprite_path="Sprites/Sprites_NPC/engineer.png"),
+                ],
+                [
+                    (Skeleton, (22, 30), "special"),
+                    (TeleportingMushroom, (30, 12), "special"),
+                    (Mushroom, (16, 16), "tank"),
+                    (EvilWizard, (36, 30), "ranged"),
+                ],
+                (160, 160, 200),
+                "Radio: Tang ham rat nguy hiem. Bat duoc dien la se mo duoc cua sat dan den phong thi nghiem.",
+                spawn_pool=[Goblin, Skeleton, TeleportingMushroom],
+                max_alive_enemies=13,
+                spawn_interval_ms=2600,
+            ),
+            # --------- NEW CHAPTER: Lab ----------
+            Chapter(
+                "lab",
+                "Chuong 5: Phong thi nghiem",
+                "Nguon goc dai dich",
+                [
+                    "Anh den nhap nhoang tren cac tủ lanh mau.",
+                    "Co the o day co thu gi do giup ban song sot lau hon.",
+                ],
+                ["Lay mau khang the", "Cuu bac si", "Mo loi ra sanh chinh"],
+                (39, 35),
+                (3, 6),
+                lab_blocked,
+                lab_decor,
+                [
+                    ItemPickup((34, 10), "Mau khang the", "Mot ong mau duoc niem phong. Co the dung de pha che.", "antidote", color=GREEN),
+                    ItemPickup((8, 34), "Medkit", "Hop cuu thuong con day.", "heal", amount=50),
+                    ItemPickup((18, 30), "The tu an ninh", "Mo cua ra hanh lang chinh.", "keycard", color=BLUE),
+                ],
+                [
+                    NPC("Bac si Hoa", (12, 8), ["Cau tim thay ong mau roi sao?", "Hay mo cua an ninh, chung ta can ra khoi day ngay!"], reward="medkit", portrait_color=CYAN, sprite_path="Sprites/Sprites_NPC/doctor.png"),
+                ],
+                [
+                    (EvilWizard, (26, 8), "ranged"),
+                    (Skeleton, (32, 24), "special"),
+                    (Mushroom, (22, 34), "tank"),
+                    (DashingGoblin, (37, 18), "fast"),
+                ],
+                (120, 220, 200),
+                "Bac si: Neu lay duoc mau khang the, co the keo dai thoi gian song sot. Nhung hay ra khoi phong thi nghiem!",
+                spawn_pool=[Goblin, DashingGoblin, FlyingEye, Skeleton],
+                max_alive_enemies=14,
+                spawn_interval_ms=2400,
+            ),
             Chapter(
                 "ground",
-                "Chuong 4: Tang 1 - Sanh chinh",
+                "Chuong 6: Tang 1 - Sanh chinh",
                 "Diem nghen cuoi cung ben trong toa nha",
                 ["Ban da xuong toi tang tret. Coi bao dong vang doi khap sanh.", "Zombie dang tran vao qua cac cua kinh vo.", "Phai mo duoc cong chinh de ra san sau."],
                 ["Mo cong chinh", "Ha 2 zombie dac biet", "Tim loi ra san"],
@@ -751,7 +1278,7 @@ class Game:
             ),
             Chapter(
                 "escape",
-                "Chuong 5: San bay - Thoat hiem",
+                "Chuong 7: San bay - Thoat hiem",
                 "Truc thang dang doi",
                 ["Bau troi ruc lua, truc thang cuu ho da o phia truoc.", "Hay bat den hieu beacon va tru vung cho den khi chung co the ha canh."],
                 ["Bat den hieu Beacon", "Tru vung trong 25 giay", "Ha boss Old Guardian", "Len truc thang"],
@@ -811,6 +1338,12 @@ class Game:
         self.mission = MissionTracker(self.chapter)
         self.story_enemies = []
         self.current_blocked = set(self.chapter.blocked_tiles)
+        # Gate is physically closed until objectives complete
+        if self.chapter.exit_pos:
+            self.current_blocked.add(self.chapter.exit_pos)
+        # Yard gate is physically closed until switched (ground chapter only)
+        if self.chapter.id == "ground":
+            self.current_blocked.add(self.yard_gate_tile)
         self.player.x = self.chapter.start_pos[0] * TILE_SIZE + TILE_SIZE // 2
         self.player.y = self.chapter.start_pos[1] * TILE_SIZE + TILE_SIZE // 2
         self.chapter_card_timer = pygame.time.get_ticks() + 2800
@@ -824,6 +1357,10 @@ class Game:
         self.show_map = False
         self.hint_mode_index = 0
         self.next_chapter_ready = False
+        self.exit_unlocked = False
+        self.yard_spawned = False
+        self.yard_enemy_plan = []
+        self.yard_gate_tile = (26, 22)
         self.last_objective_text = self.objective_label() if self.chapter else ""
         self.objective_flash_until = pygame.time.get_ticks() + 1800
         self.last_hint_path = []
@@ -836,7 +1373,23 @@ class Game:
         self.last_spawn_at = pygame.time.get_ticks()
         self.tank = EscortTank(self.player.x - 70, self.player.y + 50)
 
-        for enemy_cls, grid_pos, archetype in self.chapter.enemy_plan:
+        def is_yard_tile(tile: tuple[int, int]) -> bool:
+            # Right/bottom quadrant: treated as outside yard in ground chapter
+            x, y = tile
+            return x >= 26 and y >= 22
+
+        enemy_plan = list(self.chapter.enemy_plan)
+        if self.chapter.id == "ground":
+            # Do not spawn outside enemies until the main gate opens
+            inside = []
+            outside = []
+            for e in enemy_plan:
+                _, grid_pos, _ = e
+                (outside if is_yard_tile(grid_pos) else inside).append(e)
+            enemy_plan = inside
+            self.yard_enemy_plan = outside
+
+        for enemy_cls, grid_pos, archetype in enemy_plan:
             ex = grid_pos[0] * TILE_SIZE + TILE_SIZE // 2
             ey = grid_pos[1] * TILE_SIZE + TILE_SIZE // 2
             if isinstance(archetype, dict) and archetype.get("type") == "boss":
@@ -850,6 +1403,12 @@ class Game:
                 enemy.obstacle_map = self.build_obstacle_grid()
                 self.story_enemies.append(StoryEnemy(enemy, archetype, grid_pos))
 
+        # Finite spawn budget for this chapter (bắn hết là hết)
+        target = self.enemy_target_per_chapter[min(index, len(self.enemy_target_per_chapter) - 1)]
+        self.enemies_initial_count = len([e for e in self.story_enemies if not e.enemy.is_dead])
+        self.enemies_remaining_to_spawn = max(0, target - self.enemies_initial_count)
+        self.last_spawn_at = pygame.time.get_ticks()
+
         self.power_boxes = []
         self.gates = []
         if self.chapter.id == "roof":
@@ -860,6 +1419,12 @@ class Game:
         elif self.chapter.id == "medical":
             self.power_boxes = [(37, 33)]
             self.gates = [(39, 35)]
+        elif self.chapter.id == "basement":
+            self.power_boxes = [(38, 9)]   # generator panel
+            self.gates = [(40, 35)]        # steel door to lab
+        elif self.chapter.id == "lab":
+            self.power_boxes = [(18, 30)]  # security console
+            self.gates = [(39, 35)]        # exit to ground lobby
         elif self.chapter.id == "ground":
             self.gates = [(7, 7)]
             self.power_boxes = [(34, 29)]
@@ -894,6 +1459,9 @@ class Game:
         self.dialog_speaker = speaker
         self.dialog_color = color
         self.dialog_lines = lines
+        self.dialog_started_at = pygame.time.get_ticks()
+        self.dialog_page_index = 0
+        self.dialog_chars_shown = 0
 
     def current_tile(self):
         return (int(self.player.x // TILE_SIZE), int(self.player.y // TILE_SIZE))
@@ -901,6 +1469,9 @@ class Game:
     def item_at_player(self):
         player_tile = self.current_tile()
         for item in self.chapter.items:
+            # Money is auto-picked up; never require E
+            if item.item_type == "money":
+                continue
             if not item.collected and abs(item.grid_pos[0] - player_tile[0]) <= 1 and abs(item.grid_pos[1] - player_tile[1]) <= 1:
                 return item
         return None
@@ -934,7 +1505,7 @@ class Game:
             projectile_speed=weapon_data.get("projectile_speed", 5),
             damage=weapon_data.get("damage", 3000),
             projectile_radius=weapon_data.get("projectile_radius", 0),
-            projectile_image=weapon_data.get("projectile_image", "Sprites/Sprites_Effect/Bullets/14.png"),
+            projectile_image=weapon_data.get("projectile_image", "Sprites/Sprites_Effect/Bullets/All_Fire_Bullet_Pixel_16x16_00.png"),
             projectile_scale=weapon_data.get("projectile_scale", (48, 48)),
             equip_on_add=equip_now,
             melee=(weapon_data.get("type", "") == "melee")
@@ -962,9 +1533,21 @@ class Game:
             if not item.collected and item.grid_pos == (tile_x, tile_y):
                 return
 
-        weapon_data = dict(random.choice(WEAPON_DROP_POOL))
-        # Find the sprite surface for this weapon
+        # Weighted rarity selection (only affects generated armory entries that have 'rarity')
+        roll = random.random()
+        want = "common" if roll < 0.78 else "rare" if roll < 0.96 else "epic"
+        candidates = [w for w in WEAPON_DROP_POOL if w.get("rarity") == want]
+        if not candidates:
+            candidates = WEAPON_DROP_POOL
+        weapon_data = dict(random.choice(candidates))
+        # Find the sprite surface for this weapon (load on demand if not preloaded)
         wp_sprite = ALL_GRAPHICS_SURFACES.get(weapon_data["image_path"])
+        if not wp_sprite and os.path.exists(weapon_data["image_path"]):
+            try:
+                wp_sprite = pygame.image.load(weapon_data["image_path"]).convert_alpha()
+                ALL_GRAPHICS_SURFACES[weapon_data["image_path"]] = wp_sprite
+            except Exception:
+                wp_sprite = None
         if wp_sprite:
             wp_sprite = pygame.transform.scale(wp_sprite, (32, 24))
 
@@ -974,11 +1557,38 @@ class Game:
                 weapon_data["name"],
                 f"Zombie da roi {weapon_data['name']}. Bam E de nhat.",
                 "weapon_drop",
-                color=ORANGE,
+                color=RARITY_COLORS.get(weapon_data.get("rarity", "common"), ORANGE),
                 weapon_data=weapon_data,
                 sprite_surface=wp_sprite
             )
         )
+
+    def spawn_mission_item_at(self, tile: tuple[int, int], item_type: str, name: str, description: str, color=YELLOW):
+        """Spawn a mission item on a walkable tile if free."""
+        tx, ty = tile
+        if not (1 <= tx < GRID_SIZE - 1 and 1 <= ty < GRID_SIZE - 1):
+            return False
+        if (tx, ty) in self.current_blocked:
+            return False
+        for it in self.chapter.items:
+            if not it.collected and it.grid_pos == (tx, ty):
+                return False
+        self.chapter.items.append(ItemPickup((tx, ty), name, description, item_type, color=color))
+        play_sound_effect("sfx_item_drop")
+        return True
+
+    def spawn_mission_item_near(self, tile: tuple[int, int], item_type: str, name: str, description: str, color=YELLOW, radius: int = 2):
+        """Try to spawn near a tile; returns True on success."""
+        tx, ty = tile
+        # search diamond-ish rings around the point
+        for r in range(0, max(0, radius) + 1):
+            for dx in range(-r, r + 1):
+                for dy in range(-r, r + 1):
+                    if abs(dx) + abs(dy) != r:
+                        continue
+                    if self.spawn_mission_item_at((tx + dx, ty + dy), item_type, name, description, color=color):
+                        return True
+        return False
 
     def collect_item(self, item):
         item.collected = True
@@ -986,6 +1596,8 @@ class Game:
         self.popup_timer = pygame.time.get_ticks() + 2600
         if item.item_type == "weapon":
             self.mission.data["weapon_collected"] = True
+            if self.chapter.id == "roof":
+                self.mission.data["stage"] = max(int(self.mission.data.get("stage", 0) or 0), 1)
             self.unlock_weapon(
                 {
                     "name": "Shotgun",
@@ -1005,12 +1617,19 @@ class Game:
             self.mission.data["medkit_collected"] = True
             if self.chapter.id == "medical":
                 self.mission.data["supply_cache"] = True
+                self.mission.data["stage"] = max(int(self.mission.data.get("stage", 0) or 0), 1)
                 self.queue_story_lines("Y ta Linh", ["Lay them bang gac va thuoc tang luc neu thay.", "Tang duoi nguy hiem hon nhieu."], GREEN)
         elif item.item_type == "ammo":
             self.popup = f"Nhat {item.amount} vien dan du tru."
+            # Feed reserve ammo into current weapon if applicable
+            w = self.weapon_manager.current_weapon
+            if w and not getattr(w, "melee", False):
+                w.reserve_ammo += item.amount
         elif item.item_type == "armor":
             self.player.add_armor(item.amount)
             self.mission.data["supply_cache"] = True
+            if self.chapter.id == "medical":
+                self.mission.data["stage"] = max(int(self.mission.data.get("stage", 0) or 0), 1)
             self.queue_story_dialog("Hero", "Ao giap nay se giup minh song dai hon.", CYAN)
         elif item.item_type == "rocket_weapon":
             self.unlock_weapon(
@@ -1039,17 +1658,44 @@ class Game:
         elif item.item_type == "keycard":
             self.mission.data["keycard_collected"] = True
             self.queue_story_lines("Bao ve Nam", ["Tot, do la the tu cua phong an ninh.", "Mang no toi hop dien ben phai."], BLUE)
+            if self.chapter.id in {"office", "lab"}:
+                self.mission.data["stage"] = max(int(self.mission.data.get("stage", 0) or 0), 2 if self.chapter.id == "office" else 2)
+        elif item.item_type == "code":
+            # Used in basement
+            self.mission.data["basement_code"] = True
+            self.popup = "Da lay duoc ma cua: 4821. Hay toi phong may va khoi dong may phat."
+            self.queue_story_dialog("Hero", "Ma cua phong may... minh can tim bang dieu khien dien.", ORANGE)
+            if self.chapter.id == "basement":
+                self.mission.data["stage"] = max(int(self.mission.data.get("stage", 0) or 0), 1)
+        elif item.item_type == "antidote":
+            # Used in lab
+            self.mission.data["antidote_collected"] = True
+            self.popup = "Da lay mau khang the. Co the dung de keo dai suc ben."
+            self.queue_story_lines("Bac si Hoa", ["Tot! Day la mau quan trong.", "Gio mo cua an ninh va thoat ra sanh chinh!"], CYAN)
+            if self.chapter.id == "lab":
+                self.mission.data["stage"] = max(int(self.mission.data.get("stage", 0) or 0), 2)
         elif item.item_type == "power":
             self.popup = "Da lay cau chi. Toi hop dien de khoi phuc nguon."
             self.queue_story_dialog("Radio", "Dien phu dang o trang thai offline. Hay lap cau chi ngay.", YELLOW)
+            if self.chapter.id == "office":
+                self.mission.data["fuse_collected"] = True
+                self.mission.data["stage"] = max(int(self.mission.data.get("stage", 0) or 0), 3)
         elif item.item_type == "exit":
             self.mission.data["supply_cache"] = True
             self.popup = "Thiet bi dieu khien cong da co trong tay."
             self.queue_story_dialog("Hero", "Mo duoc cong tang 1 roi. Phai tiep tuc di chuyen.", ORANGE)
+            if self.chapter.id == "medical":
+                self.mission.data["control_fuse_collected"] = True
+                self.mission.data["stage"] = max(int(self.mission.data.get("stage", 0) or 0), 3)
         elif item.item_type == "gate":
             self.mission.data["gate_opened"] = True
             self.popup = "Cong san da mo. Di toi beacon."
-            self.remove_gate_collision(item.grid_pos)
+            if self.chapter.id == "ground":
+                self.remove_gate_collision(self.yard_gate_tile)
+                self.spawn_particles(self.yard_gate_tile[0] * TILE_SIZE + 8, self.yard_gate_tile[1] * TILE_SIZE + 8, YELLOW, count=18)
+                play_sound_effect("sfx_gate_open")
+            else:
+                self.remove_gate_collision(item.grid_pos)
             self.queue_story_lines("Ky thuat vien Huy", ["Cong san da mo.", "Toi se giu he thong dien on dinh, cau ra beacon di."], ORANGE)
         elif item.item_type == "signal":
             self.mission.data["signal_started"] = True
@@ -1059,6 +1705,10 @@ class Game:
             self.queue_story_lines("Phi cong", ["Da nhan duoc tin hieu.", "Giu vi tri, toi se ha canh trong it phut nua."], YELLOW)
         elif item.item_type == "flare":
             self.popup = "Phao sang da san sang cho diem ha canh."
+        elif item.item_type == "money":
+            self.money += max(1, int(item.amount or 1))
+            self.popup = f"+{max(1, int(item.amount or 1))} tien"
+            self.popup_timer = pygame.time.get_ticks() + 1200
 
     def remove_gate_collision(self, gate_tile):
         if gate_tile in self.current_blocked:
@@ -1075,18 +1725,44 @@ class Game:
         if cid == "roof":
             self.mission.data["power_restored"] = True
             self.popup = "Cua ky thuat da mo. Di xuong tang 3."
+            self.mission.data["gate_opened"] = True
+            self.mission.data["stage"] = max(int(self.mission.data.get("stage", 0) or 0), 2)
         elif cid == "office":
-            if self.mission.data["keycard_collected"]:
+            # Require linear stage: have keycard + fuse first
+            if self.mission.data.get("keycard_collected") and self.mission.data.get("fuse_collected"):
                 self.mission.data["power_restored"] = True
                 self.mission.data["gate_opened"] = True
                 self.popup = "Dien da tro lai. Thang ky thuat tang 2 da mo."
                 self.remove_gate_collision((37, 35))
+                self.mission.data["stage"] = max(int(self.mission.data.get("stage", 0) or 0), 4)
             else:
-                self.popup = "Can the tu truoc khi kich hoat lai hanh lang."
+                self.popup = "Can Keycard + Fuse truoc khi kich hoat lai hanh lang."
         elif cid == "medical":
-            self.mission.data["gate_opened"] = True
-            self.popup = "Loi xuong tang 1 da duoc mo."
-            self.remove_gate_collision((39, 35))
+            # Require picking up Control Fuse first
+            if self.mission.data.get("control_fuse_collected"):
+                self.mission.data["gate_opened"] = True
+                self.popup = "Loi xuong tang 1 da duoc mo."
+                self.remove_gate_collision((39, 35))
+                self.mission.data["stage"] = max(int(self.mission.data.get("stage", 0) or 0), 3)
+            else:
+                self.popup = "Can nhat thiet bi mo cong (Control Fuse) truoc."
+        elif cid == "basement":
+            if self.mission.data.get("basement_code", False) and self.mission.data.get("special_kills", 0) >= 2:
+                self.mission.data["power_restored"] = True
+                self.mission.data["gate_opened"] = True
+                self.popup = "May phat da khoi dong. Cua sat den phong thi nghiem da mo."
+                self.remove_gate_collision((40, 35))
+                self.mission.data["stage"] = max(int(self.mission.data.get("stage", 0) or 0), 3)
+            else:
+                self.popup = "Can ma cua + ha du 2 zombie dac biet truoc."
+        elif cid == "lab":
+            if self.mission.data.get("antidote_collected", False) and self.mission.data.get("keycard_collected", False):
+                self.mission.data["gate_opened"] = True
+                self.popup = "Cua an ninh mo. Duong ra sanh chinh da thong."
+                self.remove_gate_collision((39, 35))
+                self.mission.data["stage"] = max(int(self.mission.data.get("stage", 0) or 0), 3)
+            else:
+                self.popup = "Can the tu va mau khang the truoc khi mo cua an ninh."
         elif cid == "ground":
             self.mission.data["signal_started"] = True
             self.beacon_started_at = pygame.time.get_ticks()
@@ -1098,7 +1774,7 @@ class Game:
         self.dialog_npc = npc
         self.dialog_speaker = npc.name
         self.dialog_color = npc.portrait_color
-        self.dialog_lines = list(npc.lines)
+        self.dialog_lines = (["Quest: " + npc.quest] if npc.quest else []) + list(npc.lines)
         if not npc.interacted:
             npc.interacted = True
             self.saved_npcs += 1
@@ -1122,16 +1798,33 @@ class Game:
         if self.state == "playing":
             if self.show_shop:
                 return
+            # Pause gameplay while story dialogue is open (Genshin feel)
+            if self.dialog_npc:
+                return
 
             keys = pygame.key.get_pressed()
             self.player.update(keys, self.current_blocked, None, None, TILE_SIZE)
             self.player.x = max(TILE_SIZE, min(self.player.x, self.world_w - TILE_SIZE))
             self.player.y = max(TILE_SIZE, min(self.player.y, self.world_h - TILE_SIZE))
+
+            # Auto-pickup money on contact
+            ptx, pty = self.current_tile()
+            for it in self.chapter.items:
+                if it.collected:
+                    continue
+                if it.item_type != "money":
+                    continue
+                # within 1 tile radius, so "chạy vào là nhặt"
+                if abs(it.grid_pos[0] - ptx) <= 1 and abs(it.grid_pos[1] - pty) <= 1:
+                    it.collected = True
+                    self.money += int(getattr(it, "amount", 1) or 1)
+                    play_sound_effect("sfx_item_drop")
             
             self.camera.update(self.player.x, self.player.y, self.world_w, self.world_h)
             
             self.update_enemies()
             self.spawn_dynamic_enemies()
+            self._trigger_clear_dialog_if_ready()
             
             if self.chapter.id == "ground" and self.mission.data["gate_opened"]:
                 self.tank.set_target(self.player.x - 40, self.player.y + 35)
@@ -1153,7 +1846,15 @@ class Game:
             self.skill_manager.update([entry.enemy for entry in self.story_enemies], self.current_blocked)
             self.update_particles()
             self.handle_progression()
+            self.check_auto_transition()
             self.update_hint_path()
+
+            # Player hit SFX (throttled)
+            now = pygame.time.get_ticks()
+            if self.player.health < self._last_player_hp and now - self._last_player_hit_sfx_at > 120:
+                self._last_player_hit_sfx_at = now
+                play_sound_effect("sfx_player_hit")
+            self._last_player_hp = self.player.health
             
             if self.chapter.id == "escape" and hasattr(self, 'rescue_arrived') and self.rescue_arrived:
                 # Kiem tra xem nguoi choi da den Helipad chua
@@ -1164,29 +1865,6 @@ class Game:
             if self.player.health <= 0:
                 self.end_reason = "Ban da bi zombie ap dao truoc khi thoat duoc khoi thanh pho."
                 self.state = "lose"
-
-    def spawn_dynamic_enemies(self):
-        import random
-        now = pygame.time.get_ticks()
-        alive = [entry for entry in self.story_enemies if not entry.enemy.is_dead]
-        if len(alive) >= self.chapter.max_alive_enemies:
-            return
-        if not self.chapter.spawn_pool:
-            return
-        # Enemy spawn ngẫu nhiên trên map lớn
-        px, py = int(self.player.x // TILE_SIZE), int(self.player.y // TILE_SIZE)
-        for _ in range(2):
-            gx = px + random.randint(-40, 40)
-            gy = py + random.randint(-40, 40)
-            if abs(gx - px) + abs(gy - py) < 10:
-                continue
-            enemy_cls = random.choice(self.chapter.spawn_pool)
-            ex = gx * TILE_SIZE + TILE_SIZE // 2
-            ey = gy * TILE_SIZE + TILE_SIZE // 2
-            enemy = enemy_cls(ex, ey)
-            enemy.obstacle_map = self.build_obstacle_grid()
-            archetype = "basic"
-            self.story_enemies.append(StoryEnemy(enemy, archetype, (gx, gy)))
 
     def update_frenzy(self, shot_fired):
         now = pygame.time.get_ticks()
@@ -1200,6 +1878,8 @@ class Game:
 
     def spawn_dynamic_enemies(self):
         now = pygame.time.get_ticks()
+        if self.enemies_remaining_to_spawn <= 0:
+            return
         alive = [entry for entry in self.story_enemies if not entry.enemy.is_dead]
         if len(alive) >= self.chapter.max_alive_enemies:
             return
@@ -1235,40 +1915,140 @@ class Game:
             archetype = "tank"
         self.story_enemies.append(StoryEnemy(enemy, archetype, tile))
         self.last_spawn_at = now
-        self.popup = "Them zombie dang do vao khu vuc."
-        self.popup_timer = now + 1500
+        self.enemies_remaining_to_spawn = max(0, self.enemies_remaining_to_spawn - 1)
 
     def update_enemies(self):
         for entry in self.story_enemies:
             enemy = entry.enemy
+            # Enemy hit SFX (detect health drop since last loop)
+            now = pygame.time.get_ticks()
+            cur_hp = getattr(enemy, "health", 0)
+            if (not enemy.is_dead) and cur_hp < entry._last_health and now - entry._last_hit_sfx_at > 90:
+                entry._last_hit_sfx_at = now
+                play_sound_effect("sfx_enemy_hit")
+            entry._last_health = cur_hp
+
             enemy.obstacle_map = self.build_obstacle_grid()
             enemy.update(self.player)
             enemy.x = max(TILE_SIZE, min(enemy.x, MAP_WIDTH - TILE_SIZE))
             enemy.y = max(TILE_SIZE, min(enemy.y, MAP_HEIGHT - TILE_SIZE))
             if enemy.is_dead and not entry.dead_registered:
                 entry.dead_registered = True
+                play_sound_effect("sfx_enemy_death")
                 self.kill_count += 1
                 self.mission.data["zombies_killed"] += 1
+                # Stage progression hooks (linear missions)
+                if self.chapter.id == "roof" and self.mission.data.get("weapon_collected") and self.mission.data["zombies_killed"] >= 1:
+                    self.mission.data["stage"] = max(int(self.mission.data.get("stage", 0) or 0), 2)
+                # Each kill drops 1 money
+                etile = entry.tile()
+                self.spawn_mission_item_at(etile, "money", "Tien", "1 tien roi tu zombie.", color=YELLOW)
                 if entry.archetype in {"special", "tank"}:
                     self.mission.data["special_kills"] += 1
                 if entry.archetype == "boss":
                     self.mission.data["boss_down"] = True
+
+                # Mission drops to make objectives obvious
+                if self.chapter.id == "office" and not self.mission.data.get("keycard_collected", False):
+                    # Guaranteed: kill 10 zombies -> keycard drops (not RNG)
+                    if self.mission.data.get("zombies_killed", 0) >= 10 and "office_keycard_drop" not in self.story_flags:
+                        # Only mark dropped when we successfully place it
+                        if self.spawn_mission_item_near(etile, "keycard", "Keycard", "The tu an ninh roi ra sau khi ha 10 zombie.", color=BLUE, radius=3):
+                            self.story_flags.add("office_keycard_drop")
+                            self.popup = "Da ha du 10 zombie: Keycard da roi!"
+                            self.popup_timer = pygame.time.get_ticks() + 2200
+                            self.mission.data["stage"] = max(int(self.mission.data.get("stage", 0) or 0), 1)
+                if self.chapter.id == "medical":
+                    # Stage 1 requires 3 special kills
+                    if self.mission.data.get("special_kills", 0) >= 3:
+                        self.mission.data["stage"] = max(int(self.mission.data.get("stage", 0) or 0), 2)
+                if self.chapter.id == "lab" and not self.mission.data.get("antidote_collected", False):
+                    # First special kill drops antidote vial
+                    if entry.archetype == "special":
+                        if self.spawn_mission_item_near(etile, "antidote", "Mau khang the", "Ong mau roi tu ke tan cong.", color=GREEN, radius=3):
+                            self.popup = "Co ong mau khang the roi ra!"
+                            self.popup_timer = pygame.time.get_ticks() + 2200
+                            self.mission.data["stage"] = max(int(self.mission.data.get("stage", 0) or 0), 1)
+                if self.chapter.id == "basement":
+                    if self.mission.data.get("special_kills", 0) >= 2:
+                        self.mission.data["stage"] = max(int(self.mission.data.get("stage", 0) or 0), 2)
                 self.spawn_weapon_drop(enemy.x, enemy.y)
         self.story_enemies = [
             entry for entry in self.story_enemies
             if not (entry.enemy.is_dead and entry.enemy.death_animation_completed)
         ]
 
+    def _trigger_clear_dialog_if_ready(self):
+        # When all enemies are dead and no more are allowed to spawn, play story chat
+        if self.dialog_npc:
+            return
+        if self.enemies_remaining_to_spawn > 0:
+            return
+        alive = [entry for entry in self.story_enemies if not entry.enemy.is_dead]
+        if alive:
+            return
+        flag = f"clear_dialog_{self.chapter.id}"
+        if flag in self.story_flags:
+            return
+        self.story_flags.add(flag)
+
+        cid = self.chapter.id
+        # Small cinematic exchanges per chapter (Genshin-ish)
+        if cid == "roof":
+            self.queue_story_lines("Hero", ["Hết rồi... tạm an toàn.", "Mình phải kiếm đường xuống dưới."], ORANGE)
+            self.queue_story_lines("Radio", ["Tín hiệu yếu. Cố giữ bình tĩnh.", "Đi theo đèn chỉ dẫn, tránh xa bóng tối."], YELLOW)
+        elif cid == "office":
+            self.queue_story_lines("Bao ve Nam", ["Khu này sạch. Cậu làm tốt lắm.", "Nhớ nhặt Keycard, nó mở cửa an ninh."], BLUE)
+            self.queue_story_lines("Hero", ["Rõ. Mình sẽ tìm trong xác bọn đặc biệt."], ORANGE)
+        elif cid == "medical":
+            self.queue_story_lines("Y ta Linh", ["Cậu vẫn ổn chứ?", "Lấy đồ y tế rồi đi nhanh, chúng sẽ quay lại."], GREEN)
+            self.queue_story_lines("Hero", ["Ừ. Mình đi đây."], ORANGE)
+        elif cid == "basement":
+            self.queue_story_lines("Radio", ["Dưới tầng hầm có máy phát.", "Khởi động được nó thì đường thoát sẽ mở."], YELLOW)
+            self.queue_story_lines("Hero", ["Nghe như kế hoạch duy nhất."], ORANGE)
+        elif cid == "lab":
+            self.queue_story_lines("Nha nghien cuu An", ["Tốt! Khu lab đã yên.", "Mau khang the phải được mang ra ngoài ngay."], CYAN)
+            self.queue_story_lines("Hero", ["Mở cổng. Mình ra sảnh."], ORANGE)
+        elif cid == "ground":
+            self.queue_story_lines("Phi cong", ["Khu vực tạm sạch!", "Bật beacon lên, tôi sẽ hạ độ cao."], YELLOW)
+            self.queue_story_lines("Hero", ["Đã rõ. Mình giữ vị trí."], ORANGE)
+        else:
+            self.queue_story_lines("Hero", ["Khu này sạch... đi tiếp thôi."], ORANGE)
+
     def handle_progression(self):
         if self.chapter.id == "roof" and self.mission.data["zombies_killed"] >= 1 and "roof_first_kill" not in self.story_flags:
             self.story_flags.add("roof_first_kill")
             self.queue_story_lines("Nhan vat chinh", ["Con dau tien da guc.", "Minh phai lay do roi mo loi xuong ngay."], ORANGE)
         if self.chapter.id == "roof" and self.mission.data["weapon_collected"] and self.mission.data["zombies_killed"] >= 1:
+            # Chapter 1: open gate immediately after the simple starter objectives
             self.mission.data["medkit_collected"] = True
             self.mission.data["power_restored"] = True
+            self.mission.data["gate_opened"] = True
+            self.mission.data["stage"] = max(int(self.mission.data.get("stage", 0) or 0), 2)
         if self.chapter.id == "office" and self.mission.data["power_restored"] and "office_power" not in self.story_flags:
             self.story_flags.add("office_power")
             self.queue_story_lines("Bao ve Nam", ["Dien da len. Camera cho thay cau thang ky thuat da mo.", "Di nhanh len, chung dang ap sat tu hanh lang sau."], BLUE)
+
+        # Failsafe: if player reached 10 kills but keycard never spawned (blocked tile etc)
+        if self.chapter.id == "office" and not self.mission.data.get("keycard_collected", False):
+            if int(self.mission.data.get("zombies_killed", 0) or 0) >= 10:
+                has_keycard_on_ground = any((not it.collected) and it.item_type == "keycard" for it in self.chapter.items)
+                if not has_keycard_on_ground:
+                    ptile = self.current_tile()
+                    if self.spawn_mission_item_near(ptile, "keycard", "Keycard", "The tu an ninh (failsafe).", color=BLUE, radius=2):
+                        self.popup = "Keycard da xuat hien gan ban!"
+                        self.popup_timer = pygame.time.get_ticks() + 2200
+                        self.mission.data["stage"] = max(int(self.mission.data.get("stage", 0) or 0), 1)
+
+        # Failsafe: lab antidote can never get lost due to blocked tiles
+        if self.chapter.id == "lab" and not self.mission.data.get("antidote_collected", False):
+            has_on_ground = any((not it.collected) and it.item_type == "antidote" for it in self.chapter.items)
+            if self.mission.data.get("special_kills", 0) >= 1 and not has_on_ground:
+                ptile = self.current_tile()
+                if self.spawn_mission_item_near(ptile, "antidote", "Mau khang the", "Mau khang the (failsafe).", color=GREEN, radius=2):
+                    self.popup = "Mau khang the da xuat hien gan ban!"
+                    self.popup_timer = pygame.time.get_ticks() + 2200
+                    self.mission.data["stage"] = max(int(self.mission.data.get("stage", 0) or 0), 1)
         if self.chapter.id == "medical" and self.mission.data["special_kills"] >= 2 and "medical_warning" not in self.story_flags:
             self.story_flags.add("medical_warning")
             self.queue_story_lines("Y ta Linh", ["Co loai dot bien dang di trong kho.", "Dung doi mat qua lau, no rat trau."], GREEN)
@@ -1283,26 +2063,52 @@ class Game:
         if self.chapter.id == "escape" and self.mission.data["boss_down"]:
             if not getattr(self, "countdown_started", False):
                 self.countdown_started = True
-                self.holdout_until = pygame.time.get_ticks() + 60 * 1000  # 1 phút
-                self.queue_story_lines("Phi cong", ["Da xac nhan muc tieu nguy hiem bi ha.", "Dang bay toi vi tri. Giu vung trong 1 phut!"], YELLOW)
+                self.holdout_until = pygame.time.get_ticks() + 30 * 1000  # 30 giây
+                self.queue_story_lines("Phi cong", ["Da xac nhan muc tieu nguy hiem bi ha.", "Dang bay toi vi tri. Giu vung trong 30 giay!"], YELLOW)
 
             if getattr(self, "countdown_started", False) and pygame.time.get_ticks() >= self.holdout_until and not getattr(self, "rescue_arrived", False):
                 self.rescue_arrived = True
                 self.mission.data["helicopter_arrived"] = True
                 self.queue_story_lines("Phi cong", ["Truc thang da ha canh! Len nhanh nao!"], YELLOW)
 
-        if self.mission.complete() or (self.chapter.id == "escape" and getattr(self, "rescue_arrived", False)) and not self.next_chapter_ready:
-            self.next_chapter_ready = True
-            if self.chapter.id == "roof":
-                self.popup = "Hoan thanh man khoi dong. Nhan ENTER de bat dau Chuong 2."
-            if self.chapter.id == "escape":
-                self.popup = "CHO TRUC THANG HA CANH... CHAY DEN DIEM EXTRACT!"
-                self.rescue_arrived = True # Flag for win condition at Helipad
-            elif self.chapter_index == len(self.chapters) - 1:
-                self.popup = "Da hoan thanh nhiem vu cuoi. Nhan ENTER de len truc thang."
-            else:
-                self.popup = "Da hoan thanh man choi. Nhan ENTER de sang man tiep theo."
-            self.popup_timer = pygame.time.get_ticks() + 4000
+        # Auto unlock exit gate when objectives done
+        if self.mission.complete() and not self.exit_unlocked:
+            self.exit_unlocked = True
+            if self.chapter.exit_pos:
+                self.remove_gate_collision(self.chapter.exit_pos)
+            play_sound_effect("sfx_quest_complete")
+            self.popup = "Cổng đã mở. Chạy tới cổng để đi tiếp."
+            self.popup_timer = pygame.time.get_ticks() + 3200
+
+        # Ground floor: once main gate opened -> spawn outside yard enemies
+        if self.chapter.id == "ground" and self.mission.data.get("gate_opened", False) and not self.yard_spawned:
+            self.yard_spawned = True
+            for enemy_cls, grid_pos, archetype in self.yard_enemy_plan:
+                ex = grid_pos[0] * TILE_SIZE + TILE_SIZE // 2
+                ey = grid_pos[1] * TILE_SIZE + TILE_SIZE // 2
+                enemy = enemy_cls(ex, ey)
+                enemy.obstacle_map = self.build_obstacle_grid()
+                arch = "boss" if isinstance(archetype, dict) and archetype.get("type") == "boss" else archetype
+                self.story_enemies.append(StoryEnemy(enemy, arch, grid_pos))
+            self.popup = "Tiếng cổng sắt vang lên... Quái ngoài sân đã phát hiện bạn!"
+            self.popup_timer = pygame.time.get_ticks() + 3600
+
+    def check_auto_transition(self):
+        """Walk-through gate to go next chapter (no button press)."""
+        if not self.exit_unlocked:
+            return
+        if not self.chapter.exit_pos:
+            return
+        # Ground -> Yard should be seamless (stay in same chapter)
+        if self.chapter.id == "ground":
+            return
+
+        px, py = self.current_tile()
+        ex, ey = self.chapter.exit_pos
+        if abs(px - ex) <= 0 and abs(py - ey) <= 0:
+            if self.chapter_index < len(self.chapters) - 1:
+                self.set_chapter(self.chapter_index + 1)
+                self.state = "playing"
 
     def spawn_particles(self, x, y, color, count=5):
         for _ in range(count):
@@ -1351,25 +2157,51 @@ class Game:
 
     def objective_tile(self):
         chapter_id = self.chapter.id
+        s = int(self.mission.data.get("stage", 0) or 0)
         if chapter_id == "roof":
-            if not self.mission.data["weapon_collected"]:
+            if s <= 0 and not self.mission.data["weapon_collected"]:
                 return (6, 7)
-            return (18, 7)
+            if s <= 1:
+                return (18, 7)
+            return self.chapter.exit_pos
         if chapter_id == "office":
-            if not self.mission.data["keycard_collected"]:
-                return (8, 6)
-            if not self.mission.data["npc_saved"]:
-                return (21, 17)
-            if not self.mission.data["power_restored"]:
-                return (34, 28)
+            if s <= 0:
+                return (22, 22)
+            if s == 1:
+                # keycard drop zone is dynamic; hint toward center
+                return (22, 22)
+            if s == 2:
+                return (35, 28)  # fuse item
+            if s == 3:
+                return (34, 28)  # power box
             return self.chapter.exit_pos
         if chapter_id == "medical":
-            if not self.mission.data["npc_saved"]:
-                return (18, 7)
-            if not self.mission.data["supply_cache"]:
+            if s == 0:
                 return (6, 6)
-            if not self.mission.data["gate_opened"]:
-                return (37, 33)
+            if s == 1:
+                return (19, 20)
+            if s == 2:
+                return (37, 33)  # control fuse item tile
+            if s == 3:
+                return (37, 33)  # power box tile in set_chapter
+            return self.chapter.exit_pos
+        if chapter_id == "basement":
+            if s == 0:
+                return (8, 34)
+            if s == 1:
+                return (22, 30)
+            if s == 2:
+                return (38, 9)
+            return self.chapter.exit_pos
+        if chapter_id == "lab":
+            if s == 0:
+                return (32, 24)
+            if s == 1:
+                return (32, 24)
+            if s == 2:
+                return (18, 30)  # keycard item
+            if s == 3:
+                return (18, 30)  # security console
             return self.chapter.exit_pos
         if not self.mission.data["gate_opened"]:
             return (7, 7)
@@ -1379,28 +2211,48 @@ class Game:
 
     def objective_label(self):
         cid = self.chapter.id
+        s = int(self.mission.data.get("stage", 0) or 0)
         if cid == "roof":
-            if not self.mission.data["weapon_collected"]:
-                return "Nhat sung"
-            if self.mission.data["zombies_killed"] < 1:
-                return "Ha 1 zombie de hoan tat man khoi dong"
-            return "Nhan ENTER de vao man 2"
+            if s == 0:
+                return "Nhặt vũ khí"
+            if s == 1:
+                return "Hạ 1 zombie"
+            return "Tới cổng để xuống tầng 3"
         if cid == "office":
-            if not self.mission.data["keycard_collected"]:
-                return "Tim the tu"
-            if not self.mission.data["npc_saved"]:
-                return "Noi chuyen voi bao ve"
-            if not self.mission.data["power_restored"]:
-                return "Khoi phuc dien"
-            return "Di toi cau thang xuong tang 2"
+            if s == 0:
+                k = min(int(self.mission.data.get("zombies_killed", 0) or 0), 10)
+                return f"Hạ đủ 10 zombie ({k}/10)"
+            if s == 1:
+                return "Nhặt Keycard"
+            if s == 2:
+                return "Nhặt cầu chì (Fuse)"
+            if s == 3:
+                return "Bật điện ở hộp điện"
+            return "Tới cổng để xuống tầng 2"
         if cid == "medical":
-            if not self.mission.data["npc_saved"]:
-                return "Noi chuyen voi y ta Linh"
-            if not self.mission.data["supply_cache"]:
-                return "Lay vat tu y te"
-            if not self.mission.data["gate_opened"]:
-                return "Mo loi xuong tang 1"
-            return "Di xuong tang 1"
+            if s == 0:
+                return "Nhặt vật tư y tế"
+            if s == 1:
+                return "Hạ 3 zombie đặc biệt"
+            if s == 2:
+                return "Nhặt Control Fuse"
+            return "Kích hoạt hộp điện để mở cổng"
+        if cid == "basement":
+            if s == 0:
+                return "Nhặt sổ tay mã cửa (4821)"
+            if s == 1:
+                return "Hạ 2 zombie đặc biệt"
+            if s == 2:
+                return "Bật máy phát (hộp điện)"
+            return "Tới cổng để vào phòng thí nghiệm"
+        if cid == "lab":
+            if s == 0:
+                return "Hạ 1 zombie đặc biệt để rơi mẫu"
+            if s == 1:
+                return "Nhặt mẫu kháng thể"
+            if s == 2:
+                return "Nhặt thẻ từ an ninh"
+            return "Mở cửa an ninh (console)"
         if not self.mission.data["gate_opened"]:
             return "Mo cong chính"
         if not self.mission.data["signal_started"]:
@@ -1498,6 +2350,69 @@ class Game:
         # Vẽ hiệu ứng kỹ năng
         self.skill_manager.draw(screen, self.camera)
 
+        # Darkness overlay (power-out ambience)
+        self.draw_darkness(screen)
+        # HUD mission always visible
+        self.draw_mission_hud(screen)
+
+    def draw_mission_hud(self, surface):
+        """Always-visible mission HUD (no need to talk to NPC)."""
+        if self.state != "playing" or not self.chapter or not self.mission:
+            return
+        if self.dialog_npc:
+            return
+        rect = pygame.Rect(14, 14, 320, 92)
+
+        # Semi-transparent panel so it doesn't block the map
+        panel = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
+        pygame.draw.rect(panel, (12, 14, 20, 140), panel.get_rect(), border_radius=14)
+        pygame.draw.rect(panel, (*self.chapter.chapter_color, 180), panel.get_rect(), 2, border_radius=14)
+        pygame.draw.rect(panel, (*self.chapter.chapter_color, 220), (0, 0, rect.width, 4), border_top_left_radius=14, border_top_right_radius=14)
+
+        # Title + current objective (subtle)
+        panel.blit(self.font_small.render("Quest", True, (220, 220, 230)), (12, 10))
+        obj = self.objective_label()
+        panel.blit(self.font_small.render(obj, True, (190, 190, 205)), (12, 28))
+
+        # Checkpoints
+        yy = 50
+        for text, done in self.mission.objectives()[:3]:
+            mark = "✓" if done else "•"
+            col = (120, 230, 150) if done else (160, 165, 180)
+            panel.blit(self.font_small.render(f"{mark} {text}", True, col), (12, yy))
+            yy += 18
+
+        surface.blit(panel, (rect.x, rect.y))
+
+    def draw_darkness(self, surface):
+        """Simulate blackout: dark screen + light around player."""
+        cid = self.chapter.id if self.chapter else ""
+        if cid in {"roof", "escape"}:
+            return
+        # If power restored, keep only a very subtle vignette
+        power_on = bool(self.mission and self.mission.data.get("power_restored", False))
+        base_alpha = 80 if power_on else 190
+        # Flicker when power is off
+        if not power_on:
+            t = pygame.time.get_ticks()
+            if (t // 220) % 7 == 0:
+                base_alpha = 230
+            elif (t // 180) % 9 == 0:
+                base_alpha = 160
+
+        darkness = pygame.Surface((MAP_WIDTH, MAP_HEIGHT), pygame.SRCALPHA)
+        darkness.fill((0, 0, 0, base_alpha))
+
+        # Light around player: "cut out" with gradient circles
+        psx, psy = self.camera.world_to_screen(self.player.x, self.player.y)
+        radius = 170 if power_on else 140
+        for i in range(8):
+            r = int(radius * (1 - i / 8))
+            a = int(180 * (i / 8))
+            pygame.draw.circle(darkness, (0, 0, 0, a), (int(psx), int(psy)), r)
+
+        surface.blit(darkness, (0, 0))
+
     def render_world(self, surface):
         # Get visible tile range from camera
         min_tx, max_tx, min_ty, max_ty = self.camera.get_visible_tile_range(TILE_SIZE)
@@ -1518,29 +2433,58 @@ class Game:
                 sx, sy = self.camera.world_to_screen(tx * TILE_SIZE, ty * TILE_SIZE)
                 surface.blit(base_tile, (sx, sy))
                 
-                # Vẽ bức tường (vật cản)
                 if (tx, ty) in self.current_blocked:
+                    # Draw solid wall tile first (clean readable walls)
                     surface.blit(wall_tile, (sx, sy))
-                elif (tx + ty) % 9 == 0:
-                    surface.blit(DESERT_GRASS, (sx, sy))
-                elif (tx * 7 + ty * 3) % 19 == 0:
-                    surface.blit(DESERT_GRASS_TUFT, (sx, sy))
+                    # Optional sparse contextual props on some blocked tiles (reduce clutter)
+                    prop_key = obstacle_prop_for_tile(self.chapter.id, tx, ty)
+                    if prop_key and ((tx * 5 + ty * 7) % 11 == 0):
+                        draw_prop(surface, prop_key, sx, sy)
+                else:
+                    # Outdoor-only ambient decals (avoid weird grass inside buildings)
+                    if self.chapter.id in {"roof", "ground", "escape"}:
+                        if (tx + ty) % 9 == 0:
+                            surface.blit(DESERT_GRASS, (sx, sy))
+                        elif (tx * 7 + ty * 3) % 19 == 0:
+                            surface.blit(DESERT_GRASS_TUFT, (sx, sy))
                 
                 # Ve vat trang tri Chapter
                 prop = self.chapter.decor_tiles.get((tx, ty))
                 if prop:
-                    if prop == "hut": surface.blit(DESERT_HUT, (sx, sy - 32))
-                    elif prop == "rock": surface.blit(DESERT_BIG_ROCK, (sx, sy))
-                    elif prop == "grass": surface.blit(DESERT_BIG_GRASS, (sx, sy))
-                    elif prop == "heli_pad" and hasattr(self, 'rescue_arrived') and self.rescue_arrived:
+                    if prop == "heli_pad" and hasattr(self, 'rescue_arrived') and self.rescue_arrived:
                         # Draw Heli-pad and Rescue Helidrop
                         pygame.draw.rect(surface, YELLOW, (sx-32, sy-32, 96, 96), 3)
                         screen.blit(HELICOPTER, (sx-75, sy-75))
+                    elif prop == "hut":
+                        surface.blit(DESERT_HUT, (sx, sy - 32))
+                    elif prop == "rock":
+                        surface.blit(DESERT_BIG_ROCK, (sx, sy))
+                    elif prop == "grass":
+                        surface.blit(DESERT_BIG_GRASS, (sx, sy))
+                    else:
+                        draw_prop(surface, prop, sx, sy)
                     
+        # Gate at chapter exit (shows locked/unlocked state)
+        if self.chapter.exit_pos:
+            ex, ey = self.chapter.exit_pos
+            if self.camera.is_visible(ex * TILE_SIZE, ey * TILE_SIZE):
+                gsx, gsy = self.camera.world_to_screen(ex * TILE_SIZE, ey * TILE_SIZE)
+                draw_prop(surface, "gate_open" if self.exit_unlocked else "gate_closed", gsx, gsy)
+
         for item in self.chapter.items:
             if item.collected: continue
             if self.camera.is_visible(item.grid_pos[0]*TILE_SIZE, item.grid_pos[1]*TILE_SIZE):
                 sx, sy = self.camera.world_to_screen(item.grid_pos[0]*TILE_SIZE, item.grid_pos[1]*TILE_SIZE)
+                mission_types = {"keycard", "power", "code", "antidote", "exit", "exit_key", "gate", "signal"}
+                is_mission = item.item_type in mission_types
+                if is_mission or item.item_type == "weapon_drop":
+                    pulse = 10 + int(abs(math.sin(pygame.time.get_ticks() * 0.01)) * 6)
+                    ring_col = (255, 220, 80) if is_mission else item.color
+                    pygame.draw.circle(surface, ring_col, (sx + 8, sy + 8), pulse, 2)
+                    # Name label
+                    label_col = YELLOW if is_mission else item.color
+                    label = self.font_small.render(item.name, True, label_col)
+                    surface.blit(label, (sx - 4, sy - 14))
                 if item.sprite_surface:
                     surface.blit(item.sprite_surface, (sx, sy))
                 else:
@@ -1587,6 +2531,13 @@ class Game:
         sprite = self.player.frames[self.player.direction][self.player.current_frame]
         rect = sprite.get_rect(center=(psx, psy))
         surface.blit(sprite, rect.topleft)
+
+        # Ammo text above player
+        w = self.weapon_manager.current_weapon
+        if w and not getattr(w, "melee", False):
+            ammo_text = f"{getattr(w, 'ammo_in_mag', 0)}/{getattr(w, 'reserve_ammo', 0)}"
+            label = self.font_small.render(ammo_text, True, YELLOW)
+            surface.blit(label, (psx - label.get_width() // 2, psy - 64))
         
         # Draw Particles
         for p in self.particles:
@@ -1685,30 +2636,40 @@ class Game:
         objective_rect = pygame.Rect(MAP_WIDTH + 14, 216, SIDEBAR_WIDTH - 28, 86)
         self.draw_card(objective_rect, YELLOW, title=f"Goi y: {self.hint_modes[self.hint_mode_index]}", subtitle=self.objective_label())
 
-        minimap_frame = pygame.Rect(MAP_WIDTH + 14, 312, SIDEBAR_WIDTH - 28, 214)
+        quest_rect = pygame.Rect(MAP_WIDTH + 14, 312, SIDEBAR_WIDTH - 28, 120)
+        quest_title = "Quest"
+        quest_sub = self.chapter.quest_line if getattr(self.chapter, "quest_line", "") else self.objective_label()
+        self.draw_card(quest_rect, self.chapter.chapter_color, title=quest_title, subtitle=quest_sub)
+        # Checkpoints
+        yy = quest_rect.y + 56
+        if self.mission:
+            for text, done in self.mission.objectives()[:4]:
+                mark = "[x]" if done else "[ ]"
+                color = GREEN if done else SOFT
+                line = self.font_small.render(f"{mark} {text}", True, color)
+                screen.blit(line, (quest_rect.x + 14, yy))
+                yy += 18
+
+        minimap_frame = pygame.Rect(MAP_WIDTH + 14, 442, SIDEBAR_WIDTH - 28, 214)
         self.draw_card(minimap_frame, self.chapter.chapter_color, title="Minimap", subtitle="Muc tieu va duong di")
         minimap_rect = pygame.Rect(minimap_frame.x + 12, minimap_frame.y + 44, minimap_frame.width - 24, 152)
         self.draw_minimap(minimap_rect)
 
-        info_rect = pygame.Rect(MAP_WIDTH + 14, 536, SIDEBAR_WIDTH - 28, 86)
+        info_rect = pygame.Rect(MAP_WIDTH + 14, 666, SIDEBAR_WIDTH - 28, 86)
         self.draw_card(info_rect, CYAN, title="Thong tin", subtitle=f"Zombie: {self.kill_count}  |  NPC: {self.saved_npcs}")
         y = info_rect.y + 48
         stats = [
             "Chuot trai ban  |  E nhat",
-            "Q doi sung  |  ENTER qua man",
+            "Q doi sung  |  Tu dong qua cong",
             f"Thuat toan: {self.hint_modes[self.hint_mode_index]}",
         ]
         for line in stats:
             screen.blit(self.font_small.render(line, True, SOFT), (info_rect.x + 14, y))
             y += 18
 
-        asset_rect = pygame.Rect(MAP_WIDTH + 14, 632, SIDEBAR_WIDTH - 28, 160)
+        asset_rect = pygame.Rect(MAP_WIDTH + 14, 752, SIDEBAR_WIDTH - 28, 40)
         self.draw_card(asset_rect, ORANGE, title="Loadout & Ho tro", subtitle="Card asset dang dung")
-        cards = [self.current_weapon_card(), CARD_PET_BIRD, CARD_PET_FOX, CARD_BUILD_MORTAR if self.chapter.id != "ground" else CARD_BUILD_CANNON]
-        cx = asset_rect.x + 12
-        for card in cards:
-            screen.blit(card, (cx, asset_rect.y + 46))
-            cx += 56
+        # (Cards hidden to make room for quest tracker)
 
     def draw_minimap(self, rect):
         pygame.draw.rect(screen, (8, 10, 14), rect, border_radius=10)
@@ -1822,21 +2783,40 @@ class Game:
             self.draw_full_map()
 
     def draw_dialog(self):
-        dialog_rect = pygame.Rect(42, MAP_HEIGHT - 214, 628, 160)
-        self.draw_card(dialog_rect, self.dialog_color)
-        portrait_center = (dialog_rect.x + 42, dialog_rect.y + 40)
-        pygame.draw.circle(screen, self.dialog_color, portrait_center, 22)
-        pygame.draw.circle(screen, WHITE, portrait_center, 22, 2)
-        pygame.draw.circle(screen, BLACK, (portrait_center[0], portrait_center[1] - 5), 4)
-        pygame.draw.circle(screen, BLACK, (portrait_center[0] - 8, portrait_center[1] - 5), 3)
-        pygame.draw.circle(screen, BLACK, (portrait_center[0] + 8, portrait_center[1] - 5), 3)
-        screen.blit(self.font_big.render(self.dialog_speaker, True, self.dialog_color), (dialog_rect.x + 78, dialog_rect.y + 14))
-        y = dialog_rect.y + 60
-        for line in self.dialog_lines:
-            for wrapped in wrap_text(line, self.font, dialog_rect.width - 40):
-                screen.blit(self.font.render(wrapped, True, WHITE), (dialog_rect.x + 20, y))
-                y += 22
-        screen.blit(self.font_small.render("ENTER hoặc E để tiếp tục hội thoại", True, SOFT), (dialog_rect.x + 20, dialog_rect.y + 130))
+        # Genshin-like cinematic dialog box
+        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        overlay.fill((10, 8, 12, 110))
+        screen.blit(overlay, (0, 0))
+
+        dialog_rect = pygame.Rect(48, SCREEN_HEIGHT - 210, SCREEN_WIDTH - 96, 168)
+        panel = pygame.Surface((dialog_rect.width, dialog_rect.height), pygame.SRCALPHA)
+        panel.fill((22, 22, 28, 210))
+        screen.blit(panel, dialog_rect.topleft)
+        pygame.draw.rect(screen, (255, 255, 255, 60), dialog_rect, 2, border_radius=18)
+
+        # Portrait + speaker
+        portrait_center = (dialog_rect.x + 70, dialog_rect.y + 64)
+        pygame.draw.circle(screen, self.dialog_color, portrait_center, 30)
+        pygame.draw.circle(screen, WHITE, portrait_center, 30, 2)
+        screen.blit(self.font_big.render(self.dialog_speaker, True, self.dialog_color), (dialog_rect.x + 115, dialog_rect.y + 18))
+
+        # Typewriter text
+        pages = []
+        for raw in (self.dialog_lines or [""]):
+            pages.extend(wrap_text(raw, self.font, dialog_rect.width - 150))
+        if not pages:
+            pages = [""]
+        page = pages[max(0, min(self.dialog_page_index, len(pages) - 1))]
+
+        now = pygame.time.get_ticks()
+        elapsed = max(0, now - getattr(self, "dialog_started_at", now))
+        max_chars = int((elapsed / 1000.0) * float(getattr(self, "dialog_speed_cps", 70)))
+        shown = page[:max_chars]
+        screen.blit(self.font.render(shown, True, WHITE), (dialog_rect.x + 115, dialog_rect.y + 70))
+
+        # Hint
+        hint = "SPACE/ENTER để tiếp tục"
+        screen.blit(self.font_small.render(hint, True, (220, 220, 230)), (dialog_rect.right - 260, dialog_rect.bottom - 32))
 
     def draw_full_map(self):
         overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
@@ -1973,12 +2953,43 @@ class Game:
 
     def draw_pause(self):
         overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
-        overlay.fill((10, 8, 12, 180))
+        overlay.fill((10, 8, 12, 190))
         screen.blit(overlay, (0, 0))
-        screen.blit(self.font_title.render("PAUSE", True, WHITE), (180, 160))
-        lines = ["ESC de tiep tuc", "B de vao Shop", "M de mo ban do"]
-        for i, line in enumerate(lines):
-            screen.blit(self.font_big.render(line, True, WHITE), (160, 260 + i * 50))
+
+        # Panel
+        w, h = 520, 420
+        panel = pygame.Rect((SCREEN_WIDTH - w) // 2, (SCREEN_HEIGHT - h) // 2, w, h)
+        self.draw_card(panel, YELLOW, title="TẠM DỪNG", subtitle="Chọn hành động")
+
+        def draw_btn(rect: pygame.Rect, label: str, accent: tuple[int, int, int]):
+            pygame.draw.rect(screen, CARD_ALT, rect, border_radius=14)
+            pygame.draw.rect(screen, accent, rect, 2, border_radius=14)
+            pygame.draw.rect(screen, accent, (rect.x, rect.y, rect.width, 4), border_top_left_radius=14, border_top_right_radius=14)
+            txt = self.font_big.render(label, True, WHITE)
+            screen.blit(txt, txt.get_rect(center=rect.center))
+
+        # Buttons
+        bx = panel.x + 60
+        by = panel.y + 120
+        bw = panel.width - 120
+        bh = 74
+        gap = 22
+        btn_continue = pygame.Rect(bx, by, bw, bh)
+        btn_menu = pygame.Rect(bx, by + (bh + gap), bw, bh)
+        btn_quit = pygame.Rect(bx, by + 2 * (bh + gap), bw, bh)
+        draw_btn(btn_continue, "TIẾP TỤC", GREEN)
+        draw_btn(btn_menu, "VỀ MENU", CYAN)
+        draw_btn(btn_quit, "THOÁT GAME", RED)
+
+        hint = "ESC: tiếp tục | Click nút để chọn"
+        screen.blit(self.font_small.render(hint, True, SOFT), (panel.x + 60, panel.bottom - 54))
+
+        # Store for click handling
+        self.pause_buttons = {
+            "continue": btn_continue,
+            "menu": btn_menu,
+            "quit": btn_quit,
+        }
 
     def draw_end_screen(self):
         screen.fill((10, 10, 14))
@@ -2066,17 +3077,90 @@ class Game:
         
         screen.blit(self.font_title.render("SURVIVOR SHOP", True, YELLOW), (shop_rect.x + 40, shop_rect.y + 30))
         screen.blit(self.font.render("Press B to close", True, WHITE), (shop_rect.right - 200, shop_rect.y + 40))
+        screen.blit(self.font_big.render(f"Money: {self.money}", True, YELLOW), (shop_rect.right - 260, shop_rect.y + 84))
         
-        # Grid of cards
-        all_cards = list(SHOP_CARD_SURFACES.values())
-        for i, card in enumerate(all_cards[:20]):
-            r, c = i // 5, i % 5
-            cx = shop_rect.x + 60 + c * 160
-            cy = shop_rect.y + 120 + r * 140
-            
-            # Draw card with border
-            screen.blit(CARD_BORDER, (cx-4, cy-4))
-            screen.blit(pygame.transform.scale(card, (140, 110)), (cx+5, cy+5))
+        # Curated shop inventory (each costs 1 money)
+        self.shop_items = [
+            ("heal", "Medkit +25", "Heal 25 HP"),
+            ("armor", "Armor +15", "Gain 15 armor"),
+            ("ammo", "Ammo +30", "Add 30 reserve ammo"),
+            ("weapon_pistol", "Pistol", "Buy 1 Pistol"),
+            ("weapon_minigun", "Minigun", "Buy 1 Minigun"),
+            ("weapon_flamethrower", "FlameThrower", "Buy 1 FlameThrower"),
+            ("weapon_grenadelauncher", "GrenadeLauncher", "Buy 1 GrenadeLauncher"),
+            ("weapon_poisongun", "PoisonGun", "Buy 1 PoisonGun"),
+            ("weapon_taesar", "Taesar Gun", "Buy 1 Taesar"),
+        ]
+        weapon_cards = {
+            "weapon_pistol": CARD_WEAPON_PISTOL,
+            "weapon_minigun": CARD_WEAPON_MINIGUN,
+            "weapon_flamethrower": CARD_WEAPON_FLAMETHROWER,
+            "weapon_grenadelauncher": CARD_WEAPON_GRENADE,
+            "weapon_poisongun": CARD_WEAPON_POISON,
+            "weapon_taesar": CARD_WEAPON_TAESAR,
+        }
+        for i, (sid, title, desc) in enumerate(self.shop_items):
+            r, c = i // 3, i % 3
+            cx = shop_rect.x + 40 + c * 320
+            cy = shop_rect.y + 140 + r * 135
+            card_rect = pygame.Rect(cx, cy, 290, 115)
+            pygame.draw.rect(screen, CARD, card_rect, border_radius=16)
+            pygame.draw.rect(screen, STROKE, card_rect, 1, border_radius=16)
+            pygame.draw.rect(screen, YELLOW, (card_rect.x, card_rect.y, card_rect.width, 4), border_top_left_radius=16, border_top_right_radius=16)
+            # show Shop_Cards for weapon categories
+            card = weapon_cards.get(sid)
+            if card:
+                screen.blit(card, (card_rect.x + 10, card_rect.y + 10))
+                tx = card_rect.x + 10 + 72 + 12
+            else:
+                tx = card_rect.x + 14
+                icon = ITEM_SURFACES.get("heal" if sid == "heal" else "armor" if sid == "armor" else "ammo")
+                if icon:
+                    screen.blit(icon, (card_rect.right - 44, card_rect.y + 14))
+            screen.blit(self.font_big.render(title, True, WHITE), (tx, card_rect.y + 14))
+            screen.blit(self.font.render(desc, True, SOFT), (tx, card_rect.y + 56))
+            screen.blit(self.font.render("Price: 1", True, YELLOW), (tx, card_rect.y + 86))
+
+    def handle_shop_click(self, mx, my):
+        if not hasattr(self, "shop_items"):
+            return
+        shop_rect = pygame.Rect(100, 50, SCREEN_WIDTH - 200, SCREEN_HEIGHT - 100)
+        for i, (sid, title, desc) in enumerate(self.shop_items):
+            r, c = i // 3, i % 3
+            cx = shop_rect.x + 40 + c * 320
+            cy = shop_rect.y + 140 + r * 135
+            card_rect = pygame.Rect(cx, cy, 290, 115)
+            if card_rect.collidepoint(mx, my):
+                if self.money < 1:
+                    self.popup = "Khong du tien."
+                    self.popup_timer = pygame.time.get_ticks() + 1200
+                    return
+                self.money -= 1
+                if sid == "heal":
+                    self.player.heal(25)
+                elif sid == "armor":
+                    self.player.add_armor(15)
+                elif sid == "ammo":
+                    w = self.weapon_manager.current_weapon
+                    if w and not getattr(w, "melee", False):
+                        w.reserve_ammo += 30
+                elif sid.startswith("weapon_"):
+                    # Filter big pool by type
+                    want = sid.replace("weapon_", "")
+                    alias = {
+                        "grenadelauncher": "grenade_launcher",
+                        "poisongun": "poison",
+                    }
+                    want = alias.get(want, want)
+                    candidates = [w for w in WEAPON_DROP_POOL if w.get("type") == want]
+                    if not candidates:
+                        candidates = WEAPON_DROP_POOL
+                    data = dict(random.choice(candidates))
+                    self.unlock_weapon(data, equip_now=True)
+                self.popup = f"Da mua: {title}"
+                self.popup_timer = pygame.time.get_ticks() + 1400
+                play_sound_effect("sfx_item_drop")
+                return
             
     def draw(self):
         screen.fill(BLACK)
@@ -2119,20 +3203,34 @@ class Game:
             if event.type == pygame.KEYDOWN:
                 if self.dialog_npc:
                     if event.key in (pygame.K_e, pygame.K_SPACE, pygame.K_RETURN):
-                        self.dialog_npc = None
-                        # Advance queue if needed
+                        # Finish typing current page, then next page, then next queue entry
+                        pages = []
+                        for raw in (self.dialog_lines or [""]):
+                            pages.extend(wrap_text(raw, self.font, (SCREEN_WIDTH - 96) - 150))
+                        if not pages:
+                            pages = [""]
+                        page = pages[max(0, min(self.dialog_page_index, len(pages) - 1))]
+                        now = pygame.time.get_ticks()
+                        elapsed = max(0, now - getattr(self, "dialog_started_at", now))
+                        max_chars = int((elapsed / 1000.0) * float(getattr(self, "dialog_speed_cps", 70)))
+                        if max_chars < len(page):
+                            # fast-forward typewriter
+                            self.dialog_started_at = now - int((len(page) / float(getattr(self, "dialog_speed_cps", 70))) * 1000)
+                        else:
+                            if self.dialog_page_index < len(pages) - 1:
+                                self.dialog_page_index += 1
+                                self.dialog_started_at = now
+                            else:
+                                self.dialog_npc = None
+                                self.dialog_page_index = 0
+                                self.dialog_started_at = now
+                                # Advance queued story if any
+                                self.advance_dialog_queue()
                     return
 
                 if event.key == pygame.K_q:
                     self.weapon_manager.cycle_weapon()
-                if event.key == pygame.K_RETURN:
-                    if self.next_chapter_ready:
-                        if self.chapter_index < len(self.chapters) - 1:
-                            self.set_chapter(self.chapter_index + 1)
-                            self.state = "playing"
-                        else:
-                            self.state = "win"
-                    return
+                # No manual ENTER-to-progress; progression is via gates
 
                 if event.key == pygame.K_b:
                     self.show_shop = not self.show_shop
@@ -2144,6 +3242,9 @@ class Game:
                     self.show_map = not self.show_map
                 elif event.key == pygame.K_TAB:
                     self.hint_mode_index = (self.hint_mode_index + 1) % len(self.hint_modes)
+                elif event.key == pygame.K_r:
+                    # Manual reload
+                    self.weapon_manager.reload()
                 elif event.key == pygame.K_e:
                     self.interact()
                 
@@ -2164,6 +3265,13 @@ class Game:
         if self.state == "pause" and event.type == pygame.KEYDOWN:
             if event.key == pygame.K_ESCAPE:
                 self.state = "playing"
+            elif event.key == pygame.K_RETURN:
+                self.state = "playing"
+            elif event.key == pygame.K_m:
+                self.state = "menu"
+            elif event.key == pygame.K_q:
+                pygame.quit()
+                sys.exit()
         
         if self.state in ["win", "lose"] and event.type == pygame.KEYDOWN:
             if event.key == pygame.K_RETURN:
@@ -2172,6 +3280,19 @@ class Game:
 
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             self.mouse_down = True
+            if self.state == "playing" and self.show_shop:
+                mx, my = pygame.mouse.get_pos()
+                self.handle_shop_click(mx, my)
+            if self.state == "pause":
+                mx, my = pygame.mouse.get_pos()
+                btns = getattr(self, "pause_buttons", {}) or {}
+                if btns.get("continue") and btns["continue"].collidepoint(mx, my):
+                    self.state = "playing"
+                elif btns.get("menu") and btns["menu"].collidepoint(mx, my):
+                    self.state = "menu"
+                elif btns.get("quit") and btns["quit"].collidepoint(mx, my):
+                    pygame.quit()
+                    sys.exit()
         if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
             self.mouse_down = False
 

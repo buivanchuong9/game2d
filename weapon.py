@@ -1,6 +1,37 @@
 import pygame
 import math
 
+_IMAGE_CACHE: dict[str, pygame.Surface] = {}
+
+def _sheet(path: str) -> pygame.Surface:
+    sheet = _IMAGE_CACHE.get(path)
+    if sheet is None:
+        sheet = pygame.image.load(path).convert_alpha()
+        _IMAGE_CACHE[path] = sheet
+    return sheet
+
+
+def _slice_spec(path: str, x: int, y: int, w: int, h: int) -> str:
+    return f"{path}#{x},{y},{w},{h}"
+
+
+def _pick_from_atlas(atlas: str, tile_w: int, tile_h: int, coords: list[tuple[int, int]] | None = None) -> str:
+    import random
+    sheet = _sheet(atlas)
+    max_tx = max(1, sheet.get_width() // max(1, tile_w))
+    max_ty = max(1, sheet.get_height() // max(1, tile_h))
+
+    if coords:
+        valid = [(tx, ty) for (tx, ty) in coords if 0 <= tx < max_tx and 0 <= ty < max_ty]
+        if valid:
+            tx, ty = random.choice(valid)
+            return _slice_spec(atlas, tx * tile_w, ty * tile_h, tile_w, tile_h)
+
+    tx = random.randrange(0, max_tx)
+    ty = random.randrange(0, max_ty)
+    return _slice_spec(atlas, tx * tile_w, ty * tile_h, tile_w, tile_h)
+
+
 class Bullet:
     def __init__(self, x, y, target_x, target_y, speed=5, damage=3000, radius=0, image_path="Sprites/Sprites_Effect/Bullets/14.png", scale=(48, 48)):
         self.x = x
@@ -11,9 +42,29 @@ class Bullet:
         self.exploded = False
         self.explosion_timer = 0
         
-        # Load and scale bullet image
-        self.original_image = pygame.image.load(image_path).convert_alpha()
-        self.original_image = pygame.transform.scale(self.original_image, scale)
+        # Load and scale bullet image (safe fallback if missing/unsupported)
+        # Supports atlas slicing with syntax: "path#x,y,w,h"
+        try:
+            path = image_path
+            rect = None
+            if "#" in image_path:
+                path, spec = image_path.split("#", 1)
+                parts = [p.strip() for p in spec.split(",")]
+                if len(parts) == 4:
+                    rect = pygame.Rect(int(parts[0]), int(parts[1]), int(parts[2]), int(parts[3]))
+
+            sheet = _sheet(path)
+
+            img = sheet
+            if rect is not None:
+                # Clamp rect into image bounds
+                rect = rect.clip(sheet.get_rect())
+                img = sheet.subsurface(rect).copy()
+
+            self.original_image = pygame.transform.scale(img, scale)
+        except Exception:
+            self.original_image = pygame.Surface(scale, pygame.SRCALPHA)
+            pygame.draw.circle(self.original_image, (255, 220, 120, 220), (scale[0] // 2, scale[1] // 2), max(2, min(scale) // 4))
 
         # Calculate direction vector
         dx = target_x - x
@@ -61,7 +112,21 @@ class Bullet:
         surface.blit(self.image, rect.topleft)
 
 class Weapon:
-    def __init__(self, name, fire_rate, reload_time, image_path, projectile_speed=5, damage=3000, projectile_radius=0, projectile_image=None, projectile_scale=(48, 48), melee=False):
+    def __init__(
+        self,
+        name,
+        fire_rate,
+        reload_time,
+        image_path,
+        projectile_speed=5,
+        damage=3000,
+        projectile_radius=0,
+        projectile_image=None,
+        projectile_scale=(48, 48),
+        melee=False,
+        mag_size=18,
+        reserve_ammo=90,
+    ):
         self.name = name
         self.fire_rate = fire_rate  # Shots per second
         self.reload_time = reload_time  # Seconds
@@ -83,6 +148,12 @@ class Weapon:
             self.projectile_image = projectile_image
         self.projectile_scale = projectile_scale
         self.melee = melee
+        # Ammo / reload
+        self.mag_size = 9999 if self.melee else max(1, int(mag_size))
+        self.ammo_in_mag = self.mag_size
+        self.reserve_ammo = 0 if self.melee else max(0, int(reserve_ammo))
+        self.reloading = False
+        self.reload_end_time = 0
         # Load weapon image
         try:
             self.image = pygame.image.load(image_path).convert_alpha()
@@ -114,21 +185,96 @@ class Weapon:
         self.y = player_y + math.sin(self.angle) * self.offset
     
     def can_shoot(self):
+        if self.reloading:
+            return False
+        if not self.melee and self.ammo_in_mag <= 0:
+            return False
         current_time = pygame.time.get_ticks()
         return current_time - self.last_shot_time > (1000 / self.fire_rate)
+
+    def start_reload(self):
+        if self.melee:
+            return False
+        if self.reloading:
+            return False
+        if self.reload_time <= 0:
+            return False
+        if self.ammo_in_mag >= self.mag_size:
+            return False
+        if self.reserve_ammo <= 0:
+            return False
+        self.reloading = True
+        self.reload_end_time = pygame.time.get_ticks() + int(self.reload_time * 1000)
+        return True
+
+    def tick(self):
+        """Returns True when a reload finishes."""
+        if not self.reloading:
+            return False
+        if pygame.time.get_ticks() < self.reload_end_time:
+            return False
+        need = self.mag_size - self.ammo_in_mag
+        take = min(need, self.reserve_ammo)
+        self.ammo_in_mag += take
+        self.reserve_ammo -= take
+        self.reloading = False
+        return True
     
     def shoot(self, target_x, target_y):
+        # Auto reload on empty
+        if not self.melee and self.ammo_in_mag <= 0:
+            self.start_reload()
+            return False
         if self.can_shoot():
+            # Resolve projectile effect per shot (supports atlas random + list/dict)
+            def pick_img(proj):
+                import random
+                if proj is None:
+                    return None
+                if isinstance(proj, (list, tuple)):
+                    return pick_img(random.choice(proj)) if proj else None
+                if isinstance(proj, dict):
+                    atlas = proj.get("atlas")
+                    tile = proj.get("tile")
+                    tw = int(proj.get("tile_w", tile[0] if isinstance(tile, (list, tuple)) and len(tile) >= 1 else 16))
+                    th = int(proj.get("tile_h", tile[1] if isinstance(tile, (list, tuple)) and len(tile) >= 2 else 16))
+                    coords = proj.get("coords")
+                    if atlas:
+                        return _pick_from_atlas(atlas, tw, th, coords=coords)
+                if isinstance(proj, str) and "#RANDOM" in proj:
+                    # Syntax: "path#RANDOM,tw,th" or "path#RANDOM,tw,th,tx1:ty1|tx2:ty2..."
+                    path, spec = proj.split("#", 1)
+                    parts = [p.strip() for p in spec.split(",")]
+                    if len(parts) >= 3 and parts[0].upper() == "RANDOM":
+                        tw = int(parts[1])
+                        th = int(parts[2])
+                        coords = None
+                        if len(parts) >= 4 and parts[3]:
+                            coords = []
+                            for pair in parts[3].split("|"):
+                                if ":" in pair:
+                                    a, b = pair.split(":", 1)
+                                    try:
+                                        coords.append((int(a), int(b)))
+                                    except Exception:
+                                        pass
+                        return _pick_from_atlas(path, tw, th, coords=coords)
+                return proj
+
             if self.melee:
                 # Dung hieu ung slash tu projectile_image
-                img_path = self.projectile_image if self.projectile_image else "Sprites/Sprites_Effect/Pet_Power.png"
+                img_path = pick_img(self.projectile_image) if self.projectile_image else None
+                img_path = img_path or "Sprites/Sprites_Effect/Pet_Power.png"
                 slash = Bullet(self.x, self.y, target_x, target_y, speed=0, damage=self.damage, image_path=img_path, scale=self.projectile_scale)
                 slash.setup_melee(lifetime=15)
                 self.bullets.append(slash)
             else:
                 import random
-                bullet_imgs = [f"Sprites/Sprites_Effect/Bullets/{i:02}.png" for i in range(1, 30)]
-                img = random.choice(bullet_imgs)
+                if self.projectile_image:
+                    img = pick_img(self.projectile_image)
+                else:
+                    bullet_imgs = [f"Sprites/Sprites_Effect/Bullets/{i:02}.png" for i in range(1, 30)]
+                    img = random.choice(bullet_imgs)
                 self.bullets.append(
                     Bullet(
                         self.x,
@@ -142,6 +288,7 @@ class Weapon:
                         scale=self.projectile_scale,
                     )
                 )
+                self.ammo_in_mag = max(0, self.ammo_in_mag - 1)
             self.last_shot_time = pygame.time.get_ticks()
             return True
         return False
@@ -219,6 +366,9 @@ class WeaponManager:
         self.weapons = []
         self.max_weapons = 6
         self.current_weapon = None
+        # Optional callback: on_event(event_name: str, weapon: Weapon)
+        self.on_event = None
+        self._was_reloading = False
         
         # Add initial test weapon
         self.add_weapon("Basic Gun", 5, 1, "Sprites/Sprites_Weapon/Assaut-rifle-4-scoped.png", projectile_speed=8, damage=55, projectile_scale=(36, 36))
@@ -245,7 +395,34 @@ class WeaponManager:
         if len(self.weapons) >= self.max_weapons:
             return False
 
-        weapon = Weapon(name, fire_rate, reload_time, image_path, projectile_speed, damage, projectile_radius, projectile_image, projectile_scale, melee=melee)
+        lname = name.lower()
+        if melee:
+            mag, reserve = 9999, 0
+        elif "shotgun" in lname:
+            mag, reserve = 6, 36
+        elif "sniper" in lname:
+            mag, reserve = 5, 25
+        elif "smg" in lname:
+            mag, reserve = 24, 120
+        elif "rocket" in lname:
+            mag, reserve = 1, 6
+        else:
+            mag, reserve = 18, 90
+
+        weapon = Weapon(
+            name,
+            fire_rate,
+            reload_time,
+            image_path,
+            projectile_speed,
+            damage,
+            projectile_radius,
+            projectile_image,
+            projectile_scale,
+            melee=melee,
+            mag_size=mag,
+            reserve_ammo=reserve,
+        )
         self.weapons.append(weapon)
         if self.current_weapon is None or equip_on_add:
             self.current_weapon = weapon
@@ -262,11 +439,29 @@ class WeaponManager:
             return False
 
         self.current_weapon.update_position(player_x, player_y, target_x, target_y)
+        was_reloading = self.current_weapon.reloading
+        if self.current_weapon.tick():
+            if self.on_event:
+                self.on_event("reload_complete", self.current_weapon)
         shot_fired = False
         if is_shooting:
             shot_fired = self.current_weapon.shoot(target_x, target_y)
+            if shot_fired:
+                if self.on_event:
+                    self.on_event("shot", self.current_weapon)
+        # Fire reload_start only on transition
+        if (not was_reloading) and self.current_weapon.reloading and self.on_event:
+            self.on_event("reload_start", self.current_weapon)
         self.current_weapon.update_bullets(enemies, blocked_tiles)
         return shot_fired
+
+    def reload(self):
+        if not self.current_weapon:
+            return False
+        ok = self.current_weapon.start_reload()
+        if ok and self.on_event:
+            self.on_event("reload_start", self.current_weapon)
+        return ok
     
     def draw(self, surface, camera=None):
         if self.current_weapon:
