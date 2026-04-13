@@ -241,6 +241,36 @@ class Enemy:
             elif dx < 0:
                 self.look_right = False
 
+        # Resolve collisions with walls
+        if hasattr(self, 'obstacle_map') and self.obstacle_map is not None:
+            obstacles = self.obstacle_map if isinstance(self.obstacle_map, set) else set(
+                (x, y) for y, row in enumerate(self.obstacle_map) for x, val in enumerate(row) if val
+            )
+            enemy_rect = pygame.Rect(0, 0, 24, 24)
+            enemy_rect.center = (self.x, self.y)
+            ex, ey = int(self.x // 16), int(self.y // 16)
+            for dx_tile in range(-2, 3):
+                for dy_tile in range(-2, 3):
+                    tile = (ex + dx_tile, ey + dy_tile)
+                    if tile in obstacles:
+                        tile_rect = pygame.Rect(tile[0] * 16, tile[1] * 16, 16, 16)
+                        if enemy_rect.colliderect(tile_rect):
+                            overlap_left = enemy_rect.right - tile_rect.left
+                            overlap_right = tile_rect.right - enemy_rect.left
+                            overlap_top = enemy_rect.bottom - tile_rect.top
+                            overlap_bottom = tile_rect.bottom - enemy_rect.top
+
+                            min_overlap = min(overlap_left, overlap_right, overlap_top, overlap_bottom)
+                            if min_overlap == overlap_left:
+                                self.x -= overlap_left
+                            elif min_overlap == overlap_right:
+                                self.x += overlap_right
+                            elif min_overlap == overlap_top:
+                                self.y -= overlap_top
+                            elif min_overlap == overlap_bottom:
+                                self.y += overlap_bottom
+                            enemy_rect.center = (self.x, self.y)
+
         # Update animation frame
         self.frame_timer += 1
         if self.frame_timer >= self.frame_delay:
