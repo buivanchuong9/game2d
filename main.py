@@ -1091,9 +1091,14 @@ class Game:
         # Wider connectors so player can pass smoothly
         corridor(basement_blocked, 10, 18, 10, 26, width=7)
         corridor(basement_blocked, 18, 33, 26, 33, width=7)
+        # Bỏ 1 bức tường của phòng máy bên phải (generator room) để người chơi dễ đi vào
+        carve(basement_blocked, 26, 6, 26, 16)
+        carve(basement_blocked, 28, 18, 38, 18)
         # Fix stuck-at-entrance: ensure left entrance and a clear lane inward
         carve(basement_blocked, 3, 34, 12, 36)
         carve(basement_blocked, 3, 33, 6, 39)
+        # Mở rộng đường hầm ở cổng thoát (bên phải) để nhân vật 2x2 đi qua được
+        carve(basement_blocked, 38, 33, 41, 37)
         # Widen the main hallway (avoid tiny wall gaps)
         carve(basement_blocked, 6, 19, 37, 25)
         # clutter piles
@@ -1117,6 +1122,8 @@ class Game:
         add_rect_walls(lab_blocked, 22, 22, 40, 38, doors=[(22, 30), (32, 22)])
         corridor(lab_blocked, 18, 16, 18, 20, width=5)
         corridor(lab_blocked, 18, 30, 22, 30, width=5)
+        # Mở rộng đường hầm ở cổng thoát (bên phải) để nhân vật đi vừa
+        carve(lab_blocked, 38, 33, 41, 37)
         # benches / broken glass spots
         for pos in [(12, 10), (13, 10), (14, 10), (28, 8), (29, 8), (30, 8), (26, 28), (27, 28), (30, 32), (31, 32), (32, 32)]:
             lab_blocked.add(pos)
