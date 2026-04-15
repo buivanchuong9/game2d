@@ -1,3 +1,7 @@
+# pet.py
+# Quản lý pet, pool pet, các hàm liên quan đến pet
+
+# Để trống, sẽ bổ sung sau khi tách xong các phần liên quan
 #Code for the pet Class
 import pygame
 

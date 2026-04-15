@@ -1,3 +1,7 @@
+# skill.py
+# Quản lý kỹ năng, Skill, SkillManager...
+
+# Để trống, sẽ bổ sung sau khi tách xong các phần liên quan
 import pygame
 import math
 
