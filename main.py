@@ -15,6 +15,7 @@ import sys
 import glob
 from dataclasses import dataclass, field
 from armory_data import ARMORY, RARITY_COLORS
+from scratch.print_map import carve
 
 # Định nghĩa các màu cơ bản
 BLACK = (0, 0, 0)
@@ -61,6 +62,7 @@ from skill import SkillManager, Skill
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 os.chdir(BASE_DIR)
 
+INTERACT_RADIUS = 60
 TILE_SIZE = 16
 GRID_SIZE = 44
 
@@ -122,6 +124,7 @@ def play_bg_music():
             pygame.mixer.music.load("Sounds/nhac_nen_chinh.mp3")
         else:
             pygame.mixer.music.load("Sounds/Game_loop_music.mp3")
+        pygame.mixer.music.set_volume(0.3)    
         pygame.mixer.music.play(-1)
     except Exception as e:
         print(f"[MUSIC ERROR] {e}")
@@ -596,7 +599,7 @@ class EscortTank:
         dx = self.target[0] - self.x
         dy = self.target[1] - self.y
         distance = math.hypot(dx, dy)
-        if distance < 4:
+        if distance < 50:
             self.active = False
             return
         self.x += dx / distance * self.speed
@@ -725,6 +728,19 @@ class Game:
         self.camera = Camera(SCREEN_WIDTH, SCREEN_HEIGHT, SIDEBAR_WIDTH)
         self.player = Player(400, 400)
         self.weapon_manager = WeaponManager()
+        def find_nearest_enemy(self, radius=300):
+            px, py = self.player.x, self.player.y
+            nearest = None
+            min_dist = radius
+
+            for e in self.story_enemies:
+                ex, ey = e.pos
+                dist = math.hypot(ex - px, ey - py)
+                if dist < min_dist:
+                    min_dist = dist
+                    nearest = e
+
+            return nearest
         # Wire weapon SFX events (shot/reload)
         def _weapon_event(evt, weapon):
             wname = (getattr(weapon, "name", "") or "").lower()
@@ -994,7 +1010,7 @@ class Game:
         carve(med_blocked, 2, 2, GRID_SIZE - 3, GRID_SIZE - 3)
         med_blocked |= ring_walls()
         # Main medical hallway
-        carve(med_blocked, 4, 18, 40, 24)
+        carve(med_blocked, 4, 17, 42, 25)
         # Ward islands
         add_block_rect(med_blocked, 6, 6, 16, 14)
         add_block_rect(med_blocked, 22, 6, 38, 14)
@@ -1003,8 +1019,16 @@ class Game:
         # service core
         add_block_rect(med_blocked, 18, 8, 20, 16)
         add_block_rect(med_blocked, 18, 28, 20, 36)
-        carve(med_blocked, 4, 32, 10, 40)   # start approach
-        carve(med_blocked, 36, 32, 41, 40)  # exit approach
+        # đường đi từ đầu
+        carve(med_blocked, 4, 30, 12, 42)
+        # 🔥 EXIT: mở rộng to hẳn để không kẹt
+        carve(med_blocked, 30, 28, 43, 43)
+        # 🔥 FIX CUỐI: đảm bảo không bị block lại
+        med_blocked.discard((37, 33))
+        med_blocked.discard((36, 33))
+        med_blocked.discard((38, 33))
+        med_blocked.discard((37, 32))
+        med_blocked.discard((37, 34))
         med_decor = {
             # Medical context props
             (8, 10): "medical_bed",
@@ -1077,30 +1101,17 @@ class Game:
         carve(basement_blocked, 2, 33, 8, 39)           # spawn pocket
         carve(basement_blocked, 8, 33, 14, 35)          # connector to corridor
         # central hallway rails
-        for x in range(6, 38):
-            basement_blocked.add((x, 20))
-            basement_blocked.add((x, 24))
+        for x in range(10, 34):   # thu ngắn lại
+            basement_blocked.add((x, 22))   # chỉ giữ 1 line thôi
         for pos in [(16, 20), (17, 20), (28, 24), (29, 24), (10, 24), (11, 24), (34, 20), (35, 20)]:
             basement_blocked.discard(pos)
+
         # generator room (top-right)
+
+        # Right room
         add_rect_walls(basement_blocked, 26, 4, 40, 18, doors=[(38, 18), (26, 10)])
-        # storage room (bottom-left)
-        add_rect_walls(basement_blocked, 4, 26, 18, 40, doors=[(18, 33), (10, 26), (4, 35)])
-        # pump room (top-left)
-        add_rect_walls(basement_blocked, 4, 4, 18, 18, doors=[(10, 18), (18, 10)])
-        # Wider connectors so player can pass smoothly
-        corridor(basement_blocked, 10, 18, 10, 26, width=7)
-        corridor(basement_blocked, 18, 33, 26, 33, width=7)
-        # Bỏ 1 bức tường của phòng máy bên phải (generator room) để người chơi dễ đi vào
-        carve(basement_blocked, 26, 6, 26, 16)
-        carve(basement_blocked, 28, 18, 38, 18)
-        # Fix stuck-at-entrance: ensure left entrance and a clear lane inward
-        carve(basement_blocked, 3, 34, 12, 36)
-        carve(basement_blocked, 3, 33, 6, 39)
-        # Mở rộng đường hầm ở cổng thoát (bên phải) để nhân vật 2x2 đi qua được
-        carve(basement_blocked, 38, 33, 41, 37)
-        # Widen the main hallway (avoid tiny wall gaps)
-        carve(basement_blocked, 6, 19, 37, 25)
+        carve(basement_blocked, 37, 17, 39, 19)
+        carve(basement_blocked, 25, 9, 27, 11)
         # clutter piles
         for pos in [(8, 30), (9, 30), (8, 31), (30, 10), (31, 10), (32, 10), (14, 10), (14, 11), (15, 11), (34, 16)]:
             basement_blocked.add(pos)
@@ -1122,8 +1133,6 @@ class Game:
         add_rect_walls(lab_blocked, 22, 22, 40, 38, doors=[(22, 30), (32, 22)])
         corridor(lab_blocked, 18, 16, 18, 20, width=5)
         corridor(lab_blocked, 18, 30, 22, 30, width=5)
-        # Mở rộng đường hầm ở cổng thoát (bên phải) để nhân vật đi vừa
-        carve(lab_blocked, 38, 33, 41, 37)
         # benches / broken glass spots
         for pos in [(12, 10), (13, 10), (14, 10), (28, 8), (29, 8), (30, 8), (26, 28), (27, 28), (30, 32), (31, 32), (32, 32)]:
             lab_blocked.add(pos)
@@ -1346,7 +1355,7 @@ class Game:
         self.story_enemies = []
         self.current_blocked = set(self.chapter.blocked_tiles)
         # Gate is physically closed until objectives complete
-        if self.chapter.exit_pos:
+        if self.chapter.exit_pos and not self.exit_unlocked:
             self.current_blocked.add(self.chapter.exit_pos)
         # Yard gate is physically closed until switched (ground chapter only)
         if self.chapter.id == "ground":
@@ -2081,6 +2090,8 @@ class Game:
         # Auto unlock exit gate when objectives done
         if self.mission.complete() and not self.exit_unlocked:
             self.exit_unlocked = True
+        if self.chapter.exit_pos in self.current_blocked:
+            self.current_blocked.remove(self.chapter.exit_pos)
             if self.chapter.exit_pos:
                 self.remove_gate_collision(self.chapter.exit_pos)
             play_sound_effect("sfx_quest_complete")
