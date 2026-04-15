@@ -1,3 +1,4 @@
+from map_props import CHAPTER_TILES, DESERT_TILE, DESERT_TILE_ALT, DESERT_WALL, DESERT_GRASS, DESERT_GRASS_TUFT, DESERT_HUT, DESERT_BIG_GRASS, DESERT_BIG_ROCK, obstacle_prop_for_tile, draw_prop
 # Màu và hằng số giao diện bổ sung
 GRAY = (120, 120, 120)
 SOFT = (200, 200, 220)
@@ -15,6 +16,9 @@ import sys
 import glob
 from dataclasses import dataclass, field
 from armory_data import ARMORY, RARITY_COLORS
+from scratch.print_map import carve
+from audio import play_bg_music, play_sound_effect
+from data import ItemPickup, Particle, NPC, Chapter, StoryEnemy, EscortTank, MissionTracker
 
 # Định nghĩa các màu cơ bản
 BLACK = (0, 0, 0)
@@ -45,6 +49,7 @@ from player import Player
 from weapon import WeaponManager
 from all_graphics import ALL_GRAPHICS
 from camera import Camera
+from ui import load_ui_font, wrap_text, safe_load, safe_sheet_frame
 
 # Tự động load toàn bộ file đồ họa vào dict ALL_GRAPHICS_SURFACES
 ALL_GRAPHICS_SURFACES = {}
@@ -61,17 +66,12 @@ from skill import SkillManager, Skill
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 os.chdir(BASE_DIR)
 
+INTERACT_RADIUS = 60
 TILE_SIZE = 16
 GRID_SIZE = 44
 
-# Tự động load toàn bộ card shop
-SHOP_CARD_SURFACES = {}
-for path in glob.glob("Shop_Cards/*.png"):
-    try:
-        img = pygame.image.load(path).convert_alpha()
-        SHOP_CARD_SURFACES[path] = img
-    except Exception as e:
-        print(f"[SHOP CARD LOAD ERROR] {path}: {e}")
+
+from shop import SHOP_CARD_SURFACES, get_random_shop_card, get_random_pet_card
 
 # Tự động load toàn bộ sound (recursive)
 SOUND_EFFECTS = {}
@@ -114,63 +114,8 @@ SOUND_CANDIDATES: dict[str, list[str]] = {
     "sfx_quest_complete": ["hoan_thanh_nhiem_vu", "sfx_quest_complete"],
 }
 
-# Hàm phát nhạc nền
-def play_bg_music():
-    try:
-        # Prefer managed music folder if present
-        if os.path.exists("Sounds/nhac_nen_chinh.mp3"):
-            pygame.mixer.music.load("Sounds/nhac_nen_chinh.mp3")
-        else:
-            pygame.mixer.music.load("Sounds/Game_loop_music.mp3")
-        pygame.mixer.music.play(-1)
-    except Exception as e:
-        print(f"[MUSIC ERROR] {e}")
 
-# Hàm lấy card shop ngẫu nhiên
-def get_random_shop_card():
-    import random
-    if SHOP_CARD_SURFACES:
-        return random.choice(list(SHOP_CARD_SURFACES.values()))
-    return None
 
-# Hàm phát hiệu ứng âm thanh
-def play_sound_effect(name):
-    # 1) If exact filename was passed, try it
-    key = (name or "").strip()
-    if not key:
-        return
-
-    # 2) Resolve key -> candidate basenames (no extension)
-    bases = SOUND_CANDIDATES.get(key)
-    candidates: list[str] = []
-    if bases:
-        for base in bases:
-            for ext in SOUND_EXTS:
-                candidates.append(f"{base}{ext}")
-    else:
-        # If caller passed a filename, also try other extensions
-        lower = key.lower()
-        candidates.append(lower)
-        root, dot, ext = lower.rpartition(".")
-        if dot and ext:
-            for e in SOUND_EXTS:
-                candidates.append(f"{root}{e}")
-        else:
-            for e in SOUND_EXTS:
-                candidates.append(f"{lower}{e}")
-
-    for fname in candidates:
-        snd = SOUND_BY_BASENAME.get(fname.lower())
-        if snd:
-            snd.play()
-            return
-
-# Hàm lấy pet/card/weapon ngẫu nhiên (ví dụ)
-def get_random_pet_card():
-    pet_cards = [k for k in SHOP_CARD_SURFACES if "Pet" in k]
-    if pet_cards:
-        return SHOP_CARD_SURFACES[random.choice(pet_cards)]
-    return None
 
 
 def load_ui_font(size, bold=False):
@@ -219,165 +164,8 @@ def wrap_text(text, font, max_width):
     return lines
 
 
-DESERT_TILE = safe_load("Sprites/Sprites_Environment/desert_tile.png", (TILE_SIZE, TILE_SIZE))
-DESERT_TILE_ALT = safe_load("Sprites/Sprites_Environment/desert_tile2.png", (TILE_SIZE, TILE_SIZE))
-DESERT_GRASS = safe_load("Sprites/Sprites_Environment/desert_grass_patch.png", (TILE_SIZE, TILE_SIZE))
-DESERT_GRASS_TUFT = safe_load("Sprites/Sprites_Environment/desert_grass.png", (TILE_SIZE, TILE_SIZE))
-DESERT_ROCK = safe_load("Sprites/Sprites_Environment/desert_rock_tile.png", (TILE_SIZE, TILE_SIZE))
-DESERT_WALL = DESERT_ROCK.copy()
-DESERT_WALL.fill((40, 40, 52), special_flags=pygame.BLEND_RGB_MULT)
-DESERT_HUT = safe_load("Sprites/Sprites_Environment/desert_Hut.png", (64, 64))
-DESERT_BIG_GRASS = safe_load("Sprites/Sprites_Environment/desert_big_grass.png", (44, 44))
-DESERT_BIG_ROCK = safe_load("Sprites/Sprites_Environment/desert_big_rock.png", (54, 54))
 
-CHAPTER_TILES = {
-    "roof": {
-        "floor1": safe_load("Sprites/Sprites_Environment/roof_tile.png", (TILE_SIZE, TILE_SIZE)),
-        "floor2": safe_load("Sprites/Sprites_Environment/roof_tile2.png", (TILE_SIZE, TILE_SIZE)),
-        "wall": safe_load("Sprites/Sprites_Environment/roof_wall.png", (TILE_SIZE, TILE_SIZE)),
-    },
-    "office": {
-        "floor1": safe_load("Sprites/Sprites_Environment/office_tile.png", (TILE_SIZE, TILE_SIZE)),
-        "floor2": safe_load("Sprites/Sprites_Environment/office_tile2.png", (TILE_SIZE, TILE_SIZE)),
-        "wall": safe_load("Sprites/Sprites_Environment/office_wall.png", (TILE_SIZE, TILE_SIZE)),
-    },
-    "medical": {
-        "floor1": safe_load("Sprites/Sprites_Environment/medical_tile.png", (TILE_SIZE, TILE_SIZE)),
-        "floor2": safe_load("Sprites/Sprites_Environment/medical_tile2.png", (TILE_SIZE, TILE_SIZE)),
-        "wall": safe_load("Sprites/Sprites_Environment/medical_wall.png", (TILE_SIZE, TILE_SIZE)),
-    },
-    "ground": {
-        "floor1": safe_load("Sprites/Sprites_Environment/lobby_tile.png", (TILE_SIZE, TILE_SIZE)),
-        "floor2": safe_load("Sprites/Sprites_Environment/lobby_tile2.png", (TILE_SIZE, TILE_SIZE)),
-        "wall": safe_load("Sprites/Sprites_Environment/lobby_wall.png", (TILE_SIZE, TILE_SIZE)),
-    },
-    # New chapters reuse existing tile sets to keep visuals consistent
-    "basement": {
-        "floor1": safe_load("Sprites/Sprites_Environment/lobby_tile.png", (TILE_SIZE, TILE_SIZE)),
-        "floor2": safe_load("Sprites/Sprites_Environment/lobby_tile2.png", (TILE_SIZE, TILE_SIZE)),
-        "wall": safe_load("Sprites/Sprites_Environment/lobby_wall.png", (TILE_SIZE, TILE_SIZE)),
-    },
-    "lab": {
-        "floor1": safe_load("Sprites/Sprites_Environment/medical_tile.png", (TILE_SIZE, TILE_SIZE)),
-        "floor2": safe_load("Sprites/Sprites_Environment/medical_tile2.png", (TILE_SIZE, TILE_SIZE)),
-        "wall": safe_load("Sprites/Sprites_Environment/medical_wall.png", (TILE_SIZE, TILE_SIZE)),
-    },
-    "escape": {
-        "floor1": safe_load("Sprites/Sprites_Environment/heli_tile.png", (TILE_SIZE, TILE_SIZE)),
-        "floor2": safe_load("Sprites/Sprites_Environment/heli_tile2.png", (TILE_SIZE, TILE_SIZE)),
-        "wall": safe_load("Sprites/Sprites_Environment/heli_wall.png", (TILE_SIZE, TILE_SIZE)),
-    }
-}
-
-# ---------------------------------------------------------------------------
-# Chapter props (foreground objects) — drawn instead of generic "wall blocks"
-# ---------------------------------------------------------------------------
-
-PROPS = {
-    # Rooftop
-    "roof_vent": safe_load("Sprites/Sprites_Environment/props/roof_vent_32.png", (32, 32)),
-    "roof_ac": safe_load("Sprites/Sprites_Environment/props/roof_ac_48.png", (48, 48)),
-    "roof_water_tank": safe_load("Sprites/Sprites_Environment/props/roof_water_tank_64.png", (64, 64)),
-    "roof_stairwell": safe_load("Sprites/Sprites_Environment/props/roof_stairwell_64.png", (64, 64)),
-    "roof_sat_dish": safe_load("Sprites/Sprites_Environment/props/roof_satdish_48.png", (48, 48)),
-
-    # Office
-    "office_desk": safe_load("Sprites/Sprites_Environment/props/office_desk_48.png", (48, 48)),
-    "office_table": safe_load("Sprites/Sprites_Environment/props/office_table_64.png", (64, 64)),
-    "office_cabinet": safe_load("Sprites/Sprites_Environment/props/office_cabinet_48.png", (48, 48)),
-    "office_glass": safe_load("Sprites/Sprites_Environment/props/office_glasswall_64.png", (64, 64)),
-
-    # Medical
-    "medical_bed": safe_load("Sprites/Sprites_Environment/props/medical_bed_64.png", (64, 64)),
-    "medical_cabinet": safe_load("Sprites/Sprites_Environment/props/medical_cabinet_48.png", (48, 48)),
-    "medical_trolley": safe_load("Sprites/Sprites_Environment/props/medical_trolley_48.png", (48, 48)),
-
-    # Basement
-    "basement_generator": safe_load("Sprites/Sprites_Environment/props/basement_generator_64.png", (64, 64)),
-    "basement_pipes": safe_load("Sprites/Sprites_Environment/props/basement_pipes_64.png", (64, 64)),
-    "basement_crates": safe_load("Sprites/Sprites_Environment/props/basement_crates_48.png", (48, 48)),
-    "basement_panel": safe_load("Sprites/Sprites_Environment/props/basement_panel_48.png", (48, 48)),
-
-    # Lab
-    "lab_freezer": safe_load("Sprites/Sprites_Environment/props/lab_freezer_64.png", (64, 64)),
-    "lab_console": safe_load("Sprites/Sprites_Environment/props/lab_console_64.png", (64, 64)),
-    "lab_bench": safe_load("Sprites/Sprites_Environment/props/lab_bench_64.png", (64, 64)),
-    "lab_tubes": safe_load("Sprites/Sprites_Environment/props/lab_tubes_48.png", (48, 48)),
-
-    # Gates
-    "gate_closed": safe_load("Sprites/Sprites_Environment/props/gate_closed_64.png", (64, 64)),
-    "gate_open": safe_load("Sprites/Sprites_Environment/props/gate_open_64.png", (64, 64)),
-}
-
-def draw_prop(surface, prop_key: str, sx: int, sy: int):
-    spr = PROPS.get(prop_key)
-    if spr is None:
-        return
-    # Most props are taller than a tile; anchor them to tile bottom
-    surface.blit(spr, (sx, sy + TILE_SIZE - spr.get_height()))
-
-
-def obstacle_prop_for_tile(chapter_id: str, tx: int, ty: int) -> str | None:
-    """Pick a context prop sprite to visually represent a blocked tile.
-
-    Deterministic by coordinates so the look stays stable per map.
-    """
-    # Border walls are kept visually subtle to avoid clutter
-    if tx in (0, GRID_SIZE - 1) or ty in (0, GRID_SIZE - 1):
-        return None
-
-    # Stable pseudo-rng per tile
-    r = (tx * 73856093) ^ (ty * 19349663) ^ (hash(chapter_id) & 0xFFFFFFFF)
-    roll = r % 100
-
-    if chapter_id == "roof":
-        # Rooftop: vents/AC units block movement
-        if roll < 55:
-            return "roof_vent"
-        if roll < 85:
-            return "roof_ac"
-        return "roof_sat_dish"
-
-    if chapter_id == "office":
-        # Office: desks/cabinets/glass partitions
-        if roll < 45:
-            return "office_desk"
-        if roll < 70:
-            return "office_cabinet"
-        if roll < 92:
-            return "office_glass"
-        return "office_table"
-
-    if chapter_id == "medical":
-        # Medical: beds/cabinets/trolleys
-        if roll < 55:
-            return "medical_bed"
-        if roll < 85:
-            return "medical_cabinet"
-        return "medical_trolley"
-
-    if chapter_id == "basement":
-        # Basement: crates/pipes/generator parts
-        if roll < 45:
-            return "basement_crates"
-        if roll < 75:
-            return "basement_pipes"
-        if roll < 92:
-            return "basement_panel"
-        return "basement_generator"
-
-    if chapter_id == "lab":
-        # Lab: benches/freezers/consoles/tube racks
-        if roll < 38:
-            return "lab_bench"
-        if roll < 65:
-            return "lab_freezer"
-        if roll < 88:
-            return "lab_console"
-        return "lab_tubes"
-
-    # Fallback: no obstacle sprite
-    return None
+from map import TILE_SIZE, GRID_SIZE
 TANK_BASE = safe_load("Sprites/Sprites_Building/Towers bases/Tower 06.png", (52, 52))
 TANK_TURRET = safe_load("Sprites/Sprites_Building/RocketLauncher.png", (52, 52))
 ROCKET_PICKUP = safe_load("Sprites/Sprites_Weapon/RPG-reisized.png", (34, 34))
@@ -596,7 +384,7 @@ class EscortTank:
         dx = self.target[0] - self.x
         dy = self.target[1] - self.y
         distance = math.hypot(dx, dy)
-        if distance < 4:
+        if distance < 50:
             self.active = False
             return
         self.x += dx / distance * self.speed
@@ -725,6 +513,19 @@ class Game:
         self.camera = Camera(SCREEN_WIDTH, SCREEN_HEIGHT, SIDEBAR_WIDTH)
         self.player = Player(400, 400)
         self.weapon_manager = WeaponManager()
+        def find_nearest_enemy(self, radius=300):
+            px, py = self.player.x, self.player.y
+            nearest = None
+            min_dist = radius
+
+            for e in self.story_enemies:
+                ex, ey = e.pos
+                dist = math.hypot(ex - px, ey - py)
+                if dist < min_dist:
+                    min_dist = dist
+                    nearest = e
+
+            return nearest
         # Wire weapon SFX events (shot/reload)
         def _weapon_event(evt, weapon):
             wname = (getattr(weapon, "name", "") or "").lower()
@@ -994,7 +795,7 @@ class Game:
         carve(med_blocked, 2, 2, GRID_SIZE - 3, GRID_SIZE - 3)
         med_blocked |= ring_walls()
         # Main medical hallway
-        carve(med_blocked, 4, 18, 40, 24)
+        carve(med_blocked, 4, 17, 42, 25)
         # Ward islands
         add_block_rect(med_blocked, 6, 6, 16, 14)
         add_block_rect(med_blocked, 22, 6, 38, 14)
@@ -1003,8 +804,16 @@ class Game:
         # service core
         add_block_rect(med_blocked, 18, 8, 20, 16)
         add_block_rect(med_blocked, 18, 28, 20, 36)
-        carve(med_blocked, 4, 32, 10, 40)   # start approach
-        carve(med_blocked, 36, 32, 41, 40)  # exit approach
+        # đường đi từ đầu
+        carve(med_blocked, 4, 30, 12, 42)
+        # 🔥 EXIT: mở rộng to hẳn để không kẹt
+        carve(med_blocked, 30, 28, 43, 43)
+        # 🔥 FIX CUỐI: đảm bảo không bị block lại
+        med_blocked.discard((37, 33))
+        med_blocked.discard((36, 33))
+        med_blocked.discard((38, 33))
+        med_blocked.discard((37, 32))
+        med_blocked.discard((37, 34))
         med_decor = {
             # Medical context props
             (8, 10): "medical_bed",
@@ -1077,30 +886,17 @@ class Game:
         carve(basement_blocked, 2, 33, 8, 39)           # spawn pocket
         carve(basement_blocked, 8, 33, 14, 35)          # connector to corridor
         # central hallway rails
-        for x in range(6, 38):
-            basement_blocked.add((x, 20))
-            basement_blocked.add((x, 24))
+        for x in range(10, 34):   # thu ngắn lại
+            basement_blocked.add((x, 22))   # chỉ giữ 1 line thôi
         for pos in [(16, 20), (17, 20), (28, 24), (29, 24), (10, 24), (11, 24), (34, 20), (35, 20)]:
             basement_blocked.discard(pos)
+
         # generator room (top-right)
+
+        # Right room
         add_rect_walls(basement_blocked, 26, 4, 40, 18, doors=[(38, 18), (26, 10)])
-        # storage room (bottom-left)
-        add_rect_walls(basement_blocked, 4, 26, 18, 40, doors=[(18, 33), (10, 26), (4, 35)])
-        # pump room (top-left)
-        add_rect_walls(basement_blocked, 4, 4, 18, 18, doors=[(10, 18), (18, 10)])
-        # Wider connectors so player can pass smoothly
-        corridor(basement_blocked, 10, 18, 10, 26, width=7)
-        corridor(basement_blocked, 18, 33, 26, 33, width=7)
-        # Bỏ 1 bức tường của phòng máy bên phải (generator room) để người chơi dễ đi vào
-        carve(basement_blocked, 26, 6, 26, 16)
-        carve(basement_blocked, 28, 18, 38, 18)
-        # Fix stuck-at-entrance: ensure left entrance and a clear lane inward
-        carve(basement_blocked, 3, 34, 12, 36)
-        carve(basement_blocked, 3, 33, 6, 39)
-        # Mở rộng đường hầm ở cổng thoát (bên phải) để nhân vật 2x2 đi qua được
-        carve(basement_blocked, 38, 33, 41, 37)
-        # Widen the main hallway (avoid tiny wall gaps)
-        carve(basement_blocked, 6, 19, 37, 25)
+        carve(basement_blocked, 37, 17, 39, 19)
+        carve(basement_blocked, 25, 9, 27, 11)
         # clutter piles
         for pos in [(8, 30), (9, 30), (8, 31), (30, 10), (31, 10), (32, 10), (14, 10), (14, 11), (15, 11), (34, 16)]:
             basement_blocked.add(pos)
@@ -1122,8 +918,6 @@ class Game:
         add_rect_walls(lab_blocked, 22, 22, 40, 38, doors=[(22, 30), (32, 22)])
         corridor(lab_blocked, 18, 16, 18, 20, width=5)
         corridor(lab_blocked, 18, 30, 22, 30, width=5)
-        # Mở rộng đường hầm ở cổng thoát (bên phải) để nhân vật đi vừa
-        carve(lab_blocked, 38, 33, 41, 37)
         # benches / broken glass spots
         for pos in [(12, 10), (13, 10), (14, 10), (28, 8), (29, 8), (30, 8), (26, 28), (27, 28), (30, 32), (31, 32), (32, 32)]:
             lab_blocked.add(pos)
@@ -1346,7 +1140,7 @@ class Game:
         self.story_enemies = []
         self.current_blocked = set(self.chapter.blocked_tiles)
         # Gate is physically closed until objectives complete
-        if self.chapter.exit_pos:
+        if self.chapter.exit_pos and not self.exit_unlocked:
             self.current_blocked.add(self.chapter.exit_pos)
         # Yard gate is physically closed until switched (ground chapter only)
         if self.chapter.id == "ground":
@@ -2081,6 +1875,8 @@ class Game:
         # Auto unlock exit gate when objectives done
         if self.mission.complete() and not self.exit_unlocked:
             self.exit_unlocked = True
+        if self.chapter.exit_pos in self.current_blocked:
+            self.current_blocked.remove(self.chapter.exit_pos)
             if self.chapter.exit_pos:
                 self.remove_gate_collision(self.chapter.exit_pos)
             play_sound_effect("sfx_quest_complete")
