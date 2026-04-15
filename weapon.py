@@ -1,3 +1,7 @@
+# weapon.py
+# Quản lý vũ khí, pool vũ khí, WeaponManager...
+
+# Để trống, sẽ bổ sung sau khi tách xong các phần liên quan
 import pygame
 import math
 
