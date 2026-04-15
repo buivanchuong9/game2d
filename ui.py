@@ -2,6 +2,10 @@
 import pygame
 import os
 
+# Absolute path of the game directory — used to resolve all asset paths
+# without relying on the working directory (no os.chdir here).
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 def load_ui_font(size, bold=False):
 	path = pygame.font.match_font("Arial", bold=bold)
 	if path:
@@ -25,8 +29,10 @@ def wrap_text(text, font, max_width):
 	return lines
 
 def safe_load(path, size):
+	"""Load and scale a sprite. Path is resolved relative to BASE_DIR."""
 	try:
-		image = pygame.image.load(path).convert_alpha()
+		abs_path = os.path.join(BASE_DIR, path) if not os.path.isabs(path) else path
+		image = pygame.image.load(abs_path).convert_alpha()
 		return pygame.transform.scale(image, size)
 	except Exception:
 		fallback = pygame.Surface(size, pygame.SRCALPHA)
@@ -34,8 +40,10 @@ def safe_load(path, size):
 		return fallback
 
 def safe_sheet_frame(path, rect, size):
+	"""Load a frame from a sprite sheet. Path is resolved relative to BASE_DIR."""
 	try:
-		sheet = pygame.image.load(path).convert_alpha()
+		abs_path = os.path.join(BASE_DIR, path) if not os.path.isabs(path) else path
+		sheet = pygame.image.load(abs_path).convert_alpha()
 		frame = sheet.subsurface(rect)
 		return pygame.transform.scale(frame, size)
 	except Exception:

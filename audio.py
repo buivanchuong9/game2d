@@ -4,6 +4,10 @@ import pygame
 import os
 import glob
 
+# Absolute path of the game directory — used for sound discovery.
+# No os.chdir here; audio.py is self-contained via absolute paths.
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 SOUND_EFFECTS = {}
 SOUND_BY_BASENAME = {}
 SOUND_EXTS = (".mp3", ".wav", ".ogg")
@@ -30,18 +34,24 @@ SOUND_CANDIDATES = {
 }
 
 def load_sounds():
-    for path in glob.glob("Sounds/**/*.*", recursive=True):
+    sounds_dir = os.path.join(BASE_DIR, "Sounds")
+    for path in glob.glob(os.path.join(sounds_dir, "**", "*.*"), recursive=True):
         if not path.lower().endswith(SOUND_EXTS):
             continue
-        SOUND_EFFECTS[path] = pygame.mixer.Sound(path)
-        SOUND_BY_BASENAME[os.path.basename(path).lower()] = SOUND_EFFECTS[path]
+        try:
+            SOUND_EFFECTS[path] = pygame.mixer.Sound(path)
+            SOUND_BY_BASENAME[os.path.basename(path).lower()] = SOUND_EFFECTS[path]
+        except Exception as e:
+            print(f"[SOUND LOAD ERROR] {path}: {e}")
 
 def play_bg_music():
     try:
-        if os.path.exists("Sounds/nhac_nen_chinh.mp3"):
-            pygame.mixer.music.load("Sounds/nhac_nen_chinh.mp3")
+        primary = os.path.join(BASE_DIR, "Sounds", "nhac_nen_chinh.mp3")
+        fallback = os.path.join(BASE_DIR, "Sounds", "Game_loop_music.mp3")
+        if os.path.exists(primary):
+            pygame.mixer.music.load(primary)
         else:
-            pygame.mixer.music.load("Sounds/Game_loop_music.mp3")
+            pygame.mixer.music.load(fallback)
         pygame.mixer.music.set_volume(0.3)
         pygame.mixer.music.play(-1)
     except Exception as e:
