@@ -117,19 +117,28 @@ class Player:
         self.y += dy
 
         if blocked_tiles:
-            player_rect = self.get_rect()
-            for tile in blocked_tiles:
-                tile_rect = pygame.Rect(tile[0] * tile_size, tile[1] * tile_size, tile_size, tile_size)
-                if player_rect.colliderect(tile_rect):
-                    if dx > 0:
-                        self.x = tile_rect.left - self.hitbox_size / 2
-                    elif dx < 0:
-                        self.x = tile_rect.right + self.hitbox_size / 2
-                    if dy > 0:
-                        self.y = tile_rect.top - self.hitbox_size / 2
-                    elif dy < 0:
-                        self.y = tile_rect.bottom + self.hitbox_size / 2
-                    player_rect = self.get_rect()
+            # Check only the tiles the player's hitbox actually overlaps with
+            min_tx = int((self.x - self.hitbox_size / 2) // tile_size)
+            max_tx = int((self.x + self.hitbox_size / 2) // tile_size)
+            min_ty = int((self.y - self.hitbox_size / 2) // tile_size)
+            max_ty = int((self.y + self.hitbox_size / 2) // tile_size)
+            
+            for tx in range(min_tx, max_tx + 1):
+                for ty in range(min_ty, max_ty + 1):
+                    if (tx, ty) in blocked_tiles:
+                        tile_rect = pygame.Rect(tx * tile_size, ty * tile_size, tile_size, tile_size)
+                        player_rect = self.get_rect()
+                        if player_rect.colliderect(tile_rect):
+                            if dx > 0:
+                                self.x = tile_rect.left - self.hitbox_size / 2
+                            elif dx < 0:
+                                self.x = tile_rect.right + self.hitbox_size / 2
+                            if dy > 0:
+                                self.y = tile_rect.top - self.hitbox_size / 2
+                            elif dy < 0:
+                                self.y = tile_rect.bottom + self.hitbox_size / 2
+                            # Re-calculate to avoid multi-collision jitter in the same axis
+                            player_rect = self.get_rect()
 
         if map_width is not None:
             self.x = max(self.hitbox_size / 2, min(self.x, map_width - self.hitbox_size / 2))
