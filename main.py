@@ -1,4 +1,10 @@
-from map_props import CHAPTER_TILES, DESERT_TILE, DESERT_TILE_ALT, DESERT_WALL, DESERT_GRASS, DESERT_GRASS_TUFT, DESERT_HUT, DESERT_BIG_GRASS, DESERT_BIG_ROCK, obstacle_prop_for_tile, draw_prop
+# Resolve working directory FIRST before any imports that load assets
+import os as _os
+_os.chdir(_os.path.dirname(_os.path.abspath(__file__)))
+
+# NOTE: map_props import is deferred to after pygame.display.set_mode()
+# because safe_load calls convert_alpha() which requires an initialized display.
+
 # Màu và hằng số giao diện bổ sung
 GRAY = (120, 120, 120)
 SOFT = (200, 200, 220)
@@ -51,20 +57,24 @@ from all_graphics import ALL_GRAPHICS
 from camera import Camera
 from ui import load_ui_font, wrap_text, safe_load, safe_sheet_frame
 
-# Tự động load toàn bộ file đồ họa vào dict ALL_GRAPHICS_SURFACES
+# --- Map props loaded HERE after display is initialized ---
+from map_props import CHAPTER_TILES, DESERT_TILE, DESERT_TILE_ALT, DESERT_WALL, DESERT_GRASS, DESERT_GRASS_TUFT, DESERT_HUT, DESERT_BIG_GRASS, DESERT_BIG_ROCK, obstacle_prop_for_tile, draw_prop
+
+from audio import SOUND_EFFECTS, SOUND_BY_BASENAME, load_sounds
+
+# Load all graphics with absolute paths via BASE_DIR from ui.py
+from ui import BASE_DIR as _ASSET_BASE
 ALL_GRAPHICS_SURFACES = {}
-for path in ALL_GRAPHICS:
+for _gfx_path in ALL_GRAPHICS:
     try:
-        # Tải ảnh và chuyển đổi sang định dạng pixel của màn hình
-        img = pygame.image.load(path).convert_alpha()
-        ALL_GRAPHICS_SURFACES[path] = img
-    except Exception as e:
-        print(f"[GRAPHICS LOAD ERROR] {path}: {e}")
+        _abs = os.path.join(_ASSET_BASE, _gfx_path) if not os.path.isabs(_gfx_path) else _gfx_path
+        ALL_GRAPHICS_SURFACES[_gfx_path] = pygame.image.load(_abs).convert_alpha()
+    except Exception as _e:
+        print(f"[GRAPHICS LOAD ERROR] {_gfx_path}: {_e}")
 
 from skill import SkillManager, Skill
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-os.chdir(BASE_DIR)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # already chdir'd above
 
 INTERACT_RADIUS = 60
 TILE_SIZE = 16
@@ -73,96 +83,8 @@ GRID_SIZE = 44
 
 from shop import SHOP_CARD_SURFACES, get_random_shop_card, get_random_pet_card
 
-# Tự động load toàn bộ sound (recursive)
-SOUND_EFFECTS = {}
-SOUND_BY_BASENAME = {}
-for path in glob.glob("Sounds/**/*.*", recursive=True):
-    try:
-        if not path.lower().endswith((".mp3", ".wav", ".ogg")):
-            continue
-        SOUND_EFFECTS[path] = pygame.mixer.Sound(path)
-        SOUND_BY_BASENAME[os.path.basename(path).lower()] = SOUND_EFFECTS[path]
-    except Exception as e:
-        print(f"[SOUND LOAD ERROR] {path}: {e}")
-
-SOUND_EXTS = (".mp3", ".wav", ".ogg")
-
-# Mapping key -> candidate base filenames (WITHOUT extension).
-# Game will try base + .mp3/.wav/.ogg, plus legacy names.
-SOUND_CANDIDATES: dict[str, list[str]] = {
-    # Weapons (new Vietnamese names)
-    "sfx_shot_rifle": ["ban_sung_truong", "sfx_gun_shot"],
-    "sfx_shot_smg": ["ban_tieu_lien"],
-    "sfx_shot_shotgun": ["ban_shotgun"],
-    "sfx_shot_sniper": ["ban_tia"],
-    "sfx_shot_rocket": ["ban_b40"],
-    "sfx_shot_melee": ["chem"],
-
-    "sfx_reload_rifle": ["thay_dan_sung_truong", "sfx_reload"],
-    "sfx_reload_smg": ["thay_dan_tieu_lien", "sfx_reload"],
-    "sfx_reload_shotgun": ["thay_dan_shotgun", "sfx_reload"],
-    "sfx_reload_sniper": ["thay_dan_tia", "sfx_reload"],
-    "sfx_reload_rocket": ["thay_dan_b40", "sfx_reload"],
-
-    # Combat/UI
-    "sfx_enemy_hit": ["zombie_trung_dan", "sfx_enemy_hit"],
-    "sfx_enemy_death": ["zombie_chet", "sfx_enemy_death"],
-    "sfx_player_hit": ["nhan_vat_trung_don", "sfx_player_hit"],
-
-    "sfx_gate_open": ["mo_cong", "sfx_gate_open"],
-    "sfx_item_drop": ["roi_vat_pham", "sfx_item_drop"],
-    "sfx_quest_complete": ["hoan_thanh_nhiem_vu", "sfx_quest_complete"],
-}
-
-
-
-
-
-def load_ui_font(size, bold=False):
-    # Chi dung font Arial
-    path = pygame.font.match_font("Arial", bold=bold)
-    if path:
-        return pygame.font.Font(path, size)
-    return pygame.font.Font(None, size)
-
-
-def safe_load(path, size):
-    try:
-        image = pygame.image.load(path).convert_alpha()
-        return pygame.transform.scale(image, size)
-    except Exception:
-        fallback = pygame.Surface(size, pygame.SRCALPHA)
-        fallback.fill((100, 100, 100, 255))
-        return fallback
-
-
-def safe_sheet_frame(path, rect, size):
-    try:
-        sheet = pygame.image.load(path).convert_alpha()
-        frame = sheet.subsurface(rect)
-        return pygame.transform.scale(frame, size)
-    except Exception:
-        fallback = pygame.Surface(size, pygame.SRCALPHA)
-        fallback.fill((120, 120, 120, 255))
-        return fallback
-
-
-def wrap_text(text, font, max_width):
-    words = text.split()
-    if not words:
-        return [""]
-    lines = []
-    current = words[0]
-    for word in words[1:]:
-        trial = f"{current} {word}"
-        if font.size(trial)[0] <= max_width:
-            current = trial
-        else:
-            lines.append(current)
-            current = word
-    lines.append(current)
-    return lines
-
+# Sounds loaded via audio module (centralised, absolute paths)
+load_sounds()
 
 
 from map import TILE_SIZE, GRID_SIZE
@@ -696,18 +618,22 @@ class Game:
                     blocked.discard((x, y))
 
         roof_blocked = ring_walls()
-        # Rooftop: open space, obstacle clusters as vents/AC, clear path to exit
-        add_block_rect(roof_blocked, 6, 10, 16, 12)   # vent cluster
-        add_block_rect(roof_blocked, 22, 6, 26, 9)    # AC cluster
-        add_block_rect(roof_blocked, 30, 26, 34, 30)  # water tank zone
-        add_block_rect(roof_blocked, 18, 30, 22, 34)  # debris
-        # carve walkable lanes
-        carve(roof_blocked, 3, 3, 40, 40)
-        roof_blocked |= ring_walls()
-        # keep obstacle islands but ensure corridors
-        carve(roof_blocked, 3, 34, 40, 36)
-        carve(roof_blocked, 4, 4, 10, 10)
-        carve(roof_blocked, 34, 30, 38, 34)
+        # Rooftop: Clear, open space with centralized obstacle islands
+        add_block_rect(roof_blocked, 12, 10, 16, 14)  # Vent cluster
+        add_block_rect(roof_blocked, 24, 6, 28, 10)   # AC cluster
+        add_block_rect(roof_blocked, 30, 26, 34, 30)  # Water tank zone
+        add_block_rect(roof_blocked, 14, 28, 18, 32)  # Debris zone
+        
+        # Primary 3-tile wide walkways ensuring path to stairwell exit
+        carve(roof_blocked, 3, 3, 41, 41)             # Mass clear internal area
+        # Re-add obstacles more selectively to keep paths very wide
+        add_block_rect(roof_blocked, 12, 12, 14, 14)  
+        add_block_rect(roof_blocked, 24, 8, 26, 10)
+        add_block_rect(roof_blocked, 32, 28, 34, 30)
+        
+        # Explicitly carve the exit and start paths (3x3 min)
+        carve(roof_blocked, 3, 4, 6, 7)              # Start area
+        carve(roof_blocked, 37, 33, 40, 36)           # Exit area
         roof_decor = {
             # Rooftop context props
             (6, 6): "roof_stairwell",
@@ -880,26 +806,30 @@ class Game:
         ]
 
         basement_blocked = ring_walls()
-        # Basement: trục hành lang trung tâm + các phòng máy/ kho hai bên
-        add_rect_walls(basement_blocked, 3, 3, 40, 40, doors=[(4, 35), (40, 35)])
-        # Ensure player start area is walkable and connected
-        carve(basement_blocked, 2, 33, 8, 39)           # spawn pocket
-        carve(basement_blocked, 8, 33, 14, 35)          # connector to corridor
-        # central hallway rails
-        for x in range(10, 34):   # thu ngắn lại
-            basement_blocked.add((x, 22))   # chỉ giữ 1 line thôi
-        for pos in [(16, 20), (17, 20), (28, 24), (29, 24), (10, 24), (11, 24), (34, 20), (35, 20)]:
-            basement_blocked.discard(pos)
+        # Outer concrete perimeter
+        add_rect_walls(basement_blocked, 3, 3, 41, 41, doors=[(4, 35), (41, 35)])  # Slightly larger perimeter
+        
+        # 1. Main 3-tile wide horizontal corridor (Spawn to Exit)
+        carve(basement_blocked, 4, 34, 41, 36)
+        
+        # 2. Large Central T-Junction (Vertical Hallway)
+        carve(basement_blocked, 19, 4, 23, 35)
+        
+        # 3. Generator Room (Top Right) - 36x8 Item is here
+        carve(basement_blocked, 28, 6, 39, 16)
+        corridor(basement_blocked, 33, 16, 33, 35, width=3) # Connector to main hall
+        
+        # 4. Storage Wing (Top Left) - 12x10 Item is here
+        carve(basement_blocked, 5, 6, 17, 18)
+        corridor(basement_blocked, 11, 18, 11, 35, width=3) # Connector to main hall
+        
+        # 5. Engineering Niche (NPC Room) - 10x26 NPC is here
+        carve(basement_blocked, 5, 23, 15, 30)
+        corridor(basement_blocked, 11, 30, 11, 35, width=3) # Connector to main hall
 
-        # generator room (top-right)
-
-        # Right room
-        add_rect_walls(basement_blocked, 26, 4, 40, 18, doors=[(38, 18), (26, 10)])
-        carve(basement_blocked, 37, 17, 39, 19)
-        carve(basement_blocked, 25, 9, 27, 11)
-        # clutter piles
-        for pos in [(8, 30), (9, 30), (8, 31), (30, 10), (31, 10), (32, 10), (14, 10), (14, 11), (15, 11), (34, 16)]:
-            basement_blocked.add(pos)
+        # Ensure spawn point and exit are completely clear
+        carve(basement_blocked, 3, 33, 6, 37)
+        carve(basement_blocked, 39, 33, 42, 37)
         basement_decor = {
             (36, 8): "basement_panel",
             (34, 12): "basement_generator",
@@ -908,25 +838,37 @@ class Game:
         }
 
         lab_blocked = ring_walls()
-        # Lab: hành lang chữ U + phòng lạnh + phòng điều khiển
-        add_rect_walls(lab_blocked, 3, 3, 40, 40, doors=[(3, 6), (39, 35)])
-        # cold storage (top)
-        add_rect_walls(lab_blocked, 8, 4, 34, 16, doors=[(18, 16), (24, 4)])
-        # research wing (left-bottom)
-        add_rect_walls(lab_blocked, 4, 20, 18, 38, doors=[(18, 30), (10, 20)])
-        # security/control (right-bottom)
-        add_rect_walls(lab_blocked, 22, 22, 40, 38, doors=[(22, 30), (32, 22)])
-        corridor(lab_blocked, 18, 16, 18, 20, width=5)
-        corridor(lab_blocked, 18, 30, 22, 30, width=5)
-        # benches / broken glass spots
-        for pos in [(12, 10), (13, 10), (14, 10), (28, 8), (29, 8), (30, 8), (26, 28), (27, 28), (30, 32), (31, 32), (32, 32)]:
-            lab_blocked.add(pos)
+        # 1. Outer Perimeter
+        add_rect_walls(lab_blocked, 2, 2, 42, 42, doors=[(3, 6), (39, 35)])
+        
+        # 2. Main U-Shaped Hallway (Expanded to 3-5 tiles width)
+        carve(lab_blocked, 3, 3, 7, 39)           # Left vertical corridor (contains spawn)
+        carve(lab_blocked, 3, 34, 38, 38)        # Bottom horizontal corridor
+        carve(lab_blocked, 34, 3, 38, 38)        # Right vertical corridor (contains exit)
+        
+        # 3. Dedicated Lab Wings (Shifted inward to avoid narrow gaps)
+        # Cold Storage (Top Center)
+        add_rect_walls(lab_blocked, 10, 5, 30, 15, doors=[(20, 15), (20, 5)])
+        # Research Wing (Bottom Left)
+        add_rect_walls(lab_blocked, 10, 20, 18, 32, doors=[(18, 26), (14, 20)])
+        # Security/Control (Bottom Right)
+        add_rect_walls(lab_blocked, 22, 20, 31, 32, doors=[(22, 26), (26, 20)])
+
+        # 4. Connecting Corridors
+        corridor(lab_blocked, 7, 26, 10, 26, width=3)   # To Research Wing
+        corridor(lab_blocked, 30, 26, 34, 26, width=3)  # To Security
+        corridor(lab_blocked, 20, 15, 20, 20, width=5)  # Center Plaza
+
+        # Ensure Spawn (3, 6) and Exit (39, 35) are fully cleared
+        carve(lab_blocked, 2, 4, 6, 8)
+        carve(lab_blocked, 38, 33, 40, 37)
+
         lab_decor = {
-            (30, 8): "lab_freezer",
-            (24, 10): "lab_freezer",
+            (25, 8): "lab_freezer",
+            (15, 8): "lab_freezer",
             (12, 26): "lab_bench",
-            (30, 26): "lab_console",
-            (18, 18): "lab_tubes",
+            (28, 26): "lab_console",
+            (20, 25): "lab_tubes",
         }
 
         return [
@@ -1268,34 +1210,45 @@ class Game:
         return (int(self.player.x // TILE_SIZE), int(self.player.y // TILE_SIZE))
 
     def item_at_player(self):
-        player_tile = self.current_tile()
         for item in self.chapter.items:
             # Money is auto-picked up; never require E
             if item.item_type == "money":
                 continue
-            if not item.collected and abs(item.grid_pos[0] - player_tile[0]) <= 1 and abs(item.grid_pos[1] - player_tile[1]) <= 1:
-                return item
+            if not item.collected:
+                ix = item.grid_pos[0] * TILE_SIZE + TILE_SIZE // 2
+                iy = item.grid_pos[1] * TILE_SIZE + TILE_SIZE // 2
+                if math.hypot(ix - self.player.x, iy - self.player.y) <= INTERACT_RADIUS:
+                    return item
         return None
 
     def npc_near_player(self):
-        px, py = self.current_tile()
         for npc in self.chapter.npcs:
-            if abs(npc.grid_pos[0] - px) <= 1 and abs(npc.grid_pos[1] - py) <= 1:
+            nx = npc.grid_pos[0] * TILE_SIZE + TILE_SIZE // 2
+            ny = npc.grid_pos[1] * TILE_SIZE + TILE_SIZE // 2
+            if math.hypot(nx - self.player.x, ny - self.player.y) <= INTERACT_RADIUS:
                 return npc
         return None
 
     def interact(self):
-        item = self.item_at_player()
-        if item:
-            self.collect_item(item)
-            return
+        # 1. NPCs (Highest Priority)
         npc = self.npc_near_player()
         if npc:
             self.open_dialog(npc)
             return
-        player_tile = self.current_tile()
-        if player_tile in self.power_boxes:
-            self.activate_box(player_tile)
+
+        # 2. Items
+        item = self.item_at_player()
+        if item:
+            self.collect_item(item)
+            return
+
+        # 3. Power Boxes / Interactive Tiles
+        for bx, by in getattr(self, "power_boxes", []):
+            pix_x = bx * TILE_SIZE + TILE_SIZE // 2
+            pix_y = by * TILE_SIZE + TILE_SIZE // 2
+            if math.hypot(pix_x - self.player.x, pix_y - self.player.y) <= INTERACT_RADIUS:
+                self.activate_box((bx, by))
+                return
 
     def unlock_weapon(self, weapon_data, equip_now=True):
         added = self.weapon_manager.add_weapon(
@@ -1897,21 +1850,34 @@ class Game:
             self.popup_timer = pygame.time.get_ticks() + 3600
 
     def check_auto_transition(self):
-        """Walk-through gate to go next chapter (no button press)."""
+        """Walk-through gate to go next chapter (no button press).
+        
+        Triggers continuously every frame when the player overlaps the
+        open exit gate within a 1.5x tile radius (pixel-based hitbox).
+        Consistent across all chapters.
+        """
         if not self.exit_unlocked:
             return
         if not self.chapter.exit_pos:
             return
-        # Ground -> Yard should be seamless (stay in same chapter)
-        if self.chapter.id == "ground":
-            return
 
-        px, py = self.current_tile()
         ex, ey = self.chapter.exit_pos
-        if abs(px - ex) <= 0 and abs(py - ey) <= 0:
+        # Exit gate centre in world-pixel coordinates
+        gate_cx = ex * TILE_SIZE + TILE_SIZE // 2
+        gate_cy = ey * TILE_SIZE + TILE_SIZE // 2
+
+        # 1.5× tile hitbox radius for generous, frustration-free detection
+        DOOR_RADIUS = TILE_SIZE * 1.5
+
+        dist = math.hypot(self.player.x - gate_cx, self.player.y - gate_cy)
+        if dist <= DOOR_RADIUS:
             if self.chapter_index < len(self.chapters) - 1:
                 self.set_chapter(self.chapter_index + 1)
                 self.state = "playing"
+            else:
+                # Final chapter — trigger win state
+                self.state = "win"
+                self.end_reason = "Bạn đã thoát thành công khỏi tòa nhà!"
 
     def spawn_particles(self, x, y, color, count=5):
         for _ in range(count):
@@ -2557,17 +2523,30 @@ class Game:
                 screen.blit(self.font.render(line, True, WHITE), (popup_rect.x + 14, yy))
                 yy += 22
         nearby_npc = self.npc_near_player()
+        nearby_item = self.item_at_player()
+        
+        # Priority: NPC > Item > Power Box
         if nearby_npc and not self.dialog_npc:
             hint_rect = pygame.Rect(24, MAP_HEIGHT - 118, 300, 32)
             pygame.draw.rect(screen, CARD_ALT, hint_rect, border_radius=10)
             pygame.draw.rect(screen, CYAN, hint_rect, 1, border_radius=10)
             screen.blit(self.font.render(f"Nhấn E để nói chuyện với {nearby_npc.name}", True, WHITE), (hint_rect.x + 10, hint_rect.y + 8))
-        item = self.item_at_player()
-        if item and not self.dialog_npc:
+        elif nearby_item and not self.dialog_npc:
             hint_rect = pygame.Rect(24, MAP_HEIGHT - 118, 300, 32)
             pygame.draw.rect(screen, CARD_ALT, hint_rect, border_radius=10)
             pygame.draw.rect(screen, ORANGE, hint_rect, 1, border_radius=10)
-            screen.blit(self.font.render(f"Nhấn E để nhặt {item.name}", True, WHITE), (hint_rect.x + 10, hint_rect.y + 8))
+            screen.blit(self.font.render(f"Nhấn E để nhặt {nearby_item.name}", True, WHITE), (hint_rect.x + 10, hint_rect.y + 8))
+        elif not self.dialog_npc:
+            # Check for power boxes
+            for bx, by in getattr(self, "power_boxes", []):
+                pix_x = bx * TILE_SIZE + TILE_SIZE // 2
+                pix_y = by * TILE_SIZE + TILE_SIZE // 2
+                if math.hypot(pix_x - self.player.x, pix_y - self.player.y) <= INTERACT_RADIUS:
+                    hint_rect = pygame.Rect(24, MAP_HEIGHT - 118, 300, 32)
+                    pygame.draw.rect(screen, CARD_ALT, hint_rect, border_radius=10)
+                    pygame.draw.rect(screen, YELLOW, hint_rect, 1, border_radius=10)
+                    screen.blit(self.font.render("Nhấn E để kích hoạt thiết bị", True, WHITE), (hint_rect.x + 10, hint_rect.y + 8))
+                    break
         if self.next_chapter_ready and not self.dialog_npc:
             ready_rect = pygame.Rect(138, 18, 448, 82)
             self.draw_card(ready_rect, YELLOW)
@@ -2972,7 +2951,7 @@ class Game:
         elif self.state == "intro":
             self.draw_intro()
         elif self.state in ["playing", "pause"]:
-            self.draw_world()
+            self.render_world(screen)
             self.draw_sidebar()
             self.draw_overlays()
             if self.show_shop:
