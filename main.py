@@ -61,6 +61,7 @@ from weapon import WeaponManager
 from all_graphics import ALL_GRAPHICS
 from camera import Camera
 from ui import load_ui_font, wrap_text, safe_load, safe_sheet_frame
+from entities.pet import Pet, PETS_DATA
 
 # --- Map props loaded HERE after display is initialized ---
 from map_props import CHAPTER_TILES, DESERT_TILE, DESERT_TILE_ALT, DESERT_WALL, DESERT_GRASS, DESERT_GRASS_TUFT, DESERT_HUT, DESERT_BIG_GRASS, DESERT_BIG_ROCK, obstacle_prop_for_tile, draw_prop
@@ -112,6 +113,10 @@ CARD_WEAPON_TAESAR = safe_load("Shop_Cards/Card_Weapon_Taesar_Gun.png", (72, 96)
 CARD_BORDER = safe_load("Shop_Cards/Card_Border_1.png", (78, 102))
 CARD_PET_BIRD = safe_load("Shop_Cards/Card_Pet_BlueBird.png", (58, 78))
 CARD_PET_FOX = safe_load("Shop_Cards/Card_Pet_Fox.png", (58, 78))
+CARD_PET_EAGLE = safe_load("Shop_Cards/Card_Pet_Eagle.png", (58, 78))
+CARD_PET_GRAY_CAT = safe_load("Shop_Cards/Card_Pet_GrayCat.png", (58, 78))
+CARD_PET_ORANGE_CAT = safe_load("Shop_Cards/Card_Pet_OrangeCat.png", (58, 78))
+CARD_PET_RACOON = safe_load("Shop_Cards/Card_Pet_Racoon.png", (58, 78))
 CARD_BUILD_MORTAR = safe_load("Shop_Cards/Card_Building_SuperMortar.png", (58, 78))
 CARD_BUILD_CANNON = safe_load("Shop_Cards/Card_Building_SuperCannon.png", (58, 78))
 PET_BIRD = safe_load("Sprites/Sprites_Pet/PET_BlueBird.png", (34, 34))
@@ -518,8 +523,15 @@ class Game:
         ))
         
         # --- Pets & Loadout ---
-        self.current_pet = PET_BIRD
-        self.unlocked_pets = [PET_BIRD]
+        self.all_pets = {}
+        for pdata in PETS_DATA:
+            pet = Pet(pdata["name"], pdata["path"], pdata["attr"], pdata["desc"])
+            self.all_pets[pdata["id"]] = pet
+        
+        self.unlocked_pets = ["blue_bird"] # Only start with Blue Bird
+        self.current_pet_id = "blue_bird"
+        self.current_pet_instance = self.all_pets["blue_bird"]
+        self.apply_pet_effects()
         
         # --- Infinite Map ---
         self.chunks = {} # (cx, cy) -> list of objects
@@ -1571,8 +1583,11 @@ class Game:
         elif item.item_type == "flare":
             self.popup = "Phao sang da san sang cho diem ha canh."
         elif item.item_type == "money":
-            self.money += max(1, int(item.amount or 1))
-            self.popup = f"+{max(1, int(item.amount or 1))} tien"
+            amount = max(1, int(item.amount or 1))
+            if hasattr(self.player, "money_mult"):
+                amount = int(amount * self.player.money_mult)
+            self.money += amount
+            self.popup = f"+{amount} tien"
             self.popup_timer = pygame.time.get_ticks() + 1200
 
     def remove_gate_collision(self, gate_tile):
@@ -1669,8 +1684,14 @@ class Game:
 
             keys = pygame.key.get_pressed()
             self.player.update(keys, self.current_blocked, None, None, TILE_SIZE)
+            if self.current_pet_instance:
+                self.current_pet_instance.update(self.player.x, self.player.y, self.player.direction, 16.6) # approx 60fps dt
             self.player.x = max(TILE_SIZE, min(self.player.x, self.world_w - TILE_SIZE))
             self.player.y = max(TILE_SIZE, min(self.player.y, self.world_h - TILE_SIZE))
+
+            # Regen logic from pet
+            if getattr(self.player, "regen", 0) > 0:
+                self.player.health = min(self.player.max_health, self.player.health + self.player.regen)
 
             # Auto-pickup money on contact
             for it in self.chapter.items:
@@ -1705,7 +1726,9 @@ class Game:
                 world_my,
                 self.mouse_down and mx < SCREEN_WIDTH - SIDEBAR_WIDTH,
                 [entry.enemy for entry in self.story_enemies],
-                self.current_blocked
+                self.current_blocked,
+                fire_rate_mult=getattr(self.player, "fire_rate_mult", 1.0),
+                damage_mult=getattr(self.player, "damage_mult", 1.0)
             )
             
             self.skill_manager.update([entry.enemy for entry in self.story_enemies], self.current_blocked)
@@ -2443,17 +2466,41 @@ class Game:
         pass
 
     def draw_pet_companion(self, surface):
-        now = pygame.time.get_ticks()
-        orbit_x = self.player.x - 34 + math.sin(now * 0.004) * 18
-        orbit_y = self.player.y + 22 + math.cos(now * 0.003) * 12
-        sx, sy = self.camera.world_to_screen(orbit_x, orbit_y)
-        surface.blit(self.current_pet, self.current_pet.get_rect(center=(sx, sy)))
-        # Enhanced orbital effect
-        for i in range(3):
-            ang = now * 0.005 + i * 2.09
-            px = sx + math.cos(ang) * 15
-            py = sy + math.sin(ang) * 15
-            pygame.draw.circle(screen, (200, 220, 255, 100), (int(px), int(py)), 3)
+        if self.current_pet_instance:
+            self.current_pet_instance.draw(surface, self.camera)
+
+    def apply_pet_effects(self):
+        """Apply current pet's attributes to player and game stats."""
+        # Reset defaults (assuming base values)
+        self.player.speed = 5
+        self.player.max_health = 300
+        # self.player.health = min(self.player.health, self.player.max_health)
+        
+        if not self.current_pet_instance:
+            return
+            
+        attr = self.current_pet_instance.attributes
+        
+        # Apply Speed
+        if "speed_mult" in attr:
+            self.player.speed *= attr["speed_mult"]
+            
+        # Apply Health
+        if "max_health_add" in attr:
+            self.player.max_health += attr["max_health_add"]
+            self.player.health = min(self.player.health + attr["max_health_add"], self.player.max_health)
+            
+        # Armor add (initial)
+        if "armor_add" in attr and getattr(self, "stats_start", 0) > pygame.time.get_ticks() - 1000:
+            self.player.armor = max(self.player.armor, attr["armor_add"])
+
+        # Other effects like damage_mult, fire_rate_mult, etc.
+        # These need to be handled where damage/fire rate is calculated.
+        # We can store them in player or weapon manager.
+        self.player.damage_mult = attr.get("damage_mult", 1.0)
+        self.player.fire_rate_mult = attr.get("fire_rate_mult", 1.0)
+        self.player.money_mult = attr.get("money_mult", 1.0)
+        self.player.regen = attr.get("regen", 0.0)
 
     def draw_chapter_backdrop(self, surface):
         top = self.chapter.chapter_color
@@ -3015,6 +3062,12 @@ class Game:
             ("weapon_grenadelauncher", "GrenadeLauncher", "Buy 1 GrenadeLauncher"),
             ("weapon_poisongun", "PoisonGun", "Buy 1 PoisonGun"),
             ("weapon_taesar", "Taesar Gun", "Buy 1 Taesar"),
+            ("pet_blue_bird", "Blue Bird", "Pet: +15% Tốc độ"),
+            ("pet_cat_gray", "Gray Cat", "Pet: +50 HP & Regen"),
+            ("pet_cat_orange", "Orange Cat", "Pet: +20% Damage"),
+            ("pet_eagle", "Eagle", "Pet: +15% Fire Rate"),
+            ("pet_fox", "Fox", "Pet: +25 Giáp"),
+            ("pet_racoon", "Racoon", "Pet: +50% Tiền"),
         ]
         weapon_cards = {
             "weapon_pistol": CARD_WEAPON_PISTOL,
@@ -3023,6 +3076,12 @@ class Game:
             "weapon_grenadelauncher": CARD_WEAPON_GRENADE,
             "weapon_poisongun": CARD_WEAPON_POISON,
             "weapon_taesar": CARD_WEAPON_TAESAR,
+            "pet_blue_bird": CARD_PET_BIRD,
+            "pet_cat_gray": CARD_PET_GRAY_CAT,
+            "pet_cat_orange": CARD_PET_ORANGE_CAT,
+            "pet_eagle": CARD_PET_EAGLE,
+            "pet_fox": CARD_PET_FOX,
+            "pet_racoon": CARD_PET_RACOON,
         }
         for i, (sid, title, desc) in enumerate(self.shop_items):
             r, c = i // 3, i % 3
@@ -3082,7 +3141,18 @@ class Game:
                         candidates = WEAPON_DROP_POOL
                     data = dict(random.choice(candidates))
                     self.unlock_weapon(data, equip_now=True)
-                self.popup = f"Đã mua: {title}"
+                elif sid.startswith("pet_"):
+                    pet_id = sid.replace("pet_", "")
+                    if pet_id not in self.unlocked_pets:
+                        self.unlocked_pets.append(pet_id)
+                        self.popup = f"Đã mua Pet: {title}"
+                    else:
+                        self.popup = f"Đã trang bị Pet: {title}"
+                    
+                    self.current_pet_id = pet_id
+                    self.current_pet_instance = self.all_pets[pet_id]
+                    self.apply_pet_effects()
+                
                 self.popup_timer = pygame.time.get_ticks() + 1400
                 play_sound_effect("sfx_item_drop")
                 return
