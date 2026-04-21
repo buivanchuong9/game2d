@@ -2,7 +2,7 @@ import pygame
 import math
 import random
 from queue import PriorityQueue
-import player
+from entities import player
 
 
 class StateMachine:

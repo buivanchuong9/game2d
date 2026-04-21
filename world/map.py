@@ -1,7 +1,7 @@
 # map.py
 # Module quản lý bản đồ, tileset, props, obstacle, spawn, decor...
 import pygame
-from ui import safe_load
+from systems.ui import safe_load
 
 TILE_SIZE = 16
 GRID_SIZE = 44
