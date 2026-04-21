@@ -6,7 +6,7 @@ import glob
 
 # Absolute path of the game directory — used for sound discovery.
 # No os.chdir here; audio.py is self-contained via absolute paths.
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 SOUND_EFFECTS = {}
 SOUND_BY_BASENAME = {}
