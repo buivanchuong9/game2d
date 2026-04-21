@@ -525,6 +525,14 @@ class Game:
         self.show_help = False
         self.show_shop = False
         self.show_map = False
+        self.map_assets = [None] + self.discover_map_backgrounds()
+        self.selected_map_index = 0
+        self.selected_map_name = "Default Tilemap"
+        self.map_background_path = None
+        self.map_background_surface = None
+        self.map_world_surface = None
+        self.map_surface_cache = {}
+        self.set_map_background_by_index(0)
         self.hint_mode_index = 0
         self.hint_modes = ["BFS", "DFS", "SAFE", "A*"]
         
@@ -568,6 +576,105 @@ class Game:
         
         play_bg_music()
         self.set_chapter(0)
+
+    def discover_map_backgrounds(self):
+        map_dir = os.path.join(BASE_DIR, "Sprites", "Sprites_Environment", "maps")
+        patterns = ("*.png", "*.jpg", "*.jpeg", "*.webp")
+        files = []
+        for pattern in patterns:
+            files.extend(glob.glob(os.path.join(map_dir, pattern)))
+        return sorted(set(files), key=lambda p: os.path.basename(p).lower())
+
+    def auto_crop_black_border(self, image: pygame.Surface) -> pygame.Surface:
+        """Crop uniform black borders from map images while keeping gameplay stable."""
+        w, h = image.get_size()
+        if w < 8 or h < 8:
+            return image
+
+        # Downscale for fast border detection on very large maps.
+        max_scan_edge = 512
+        scale = min(1.0, float(max_scan_edge) / float(max(w, h)))
+        scan_w = max(1, int(w * scale))
+        scan_h = max(1, int(h * scale))
+        scan = pygame.transform.smoothscale(image, (scan_w, scan_h)) if scale < 1.0 else image
+
+        threshold = 10
+        min_x, min_y = scan_w, scan_h
+        max_x, max_y = -1, -1
+
+        for y in range(scan_h):
+            for x in range(scan_w):
+                px = scan.get_at((x, y))
+                if len(px) >= 4 and px[3] <= threshold:
+                    continue
+                if px[0] > threshold or px[1] > threshold or px[2] > threshold:
+                    if x < min_x:
+                        min_x = x
+                    if y < min_y:
+                        min_y = y
+                    if x > max_x:
+                        max_x = x
+                    if y > max_y:
+                        max_y = y
+
+        # If nothing detectable, keep original for safety.
+        if max_x < 0 or max_y < 0:
+            return image
+
+        # Map scan bbox back to original image coordinates.
+        x1 = int(min_x * w / scan_w)
+        y1 = int(min_y * h / scan_h)
+        x2 = int((max_x + 1) * w / scan_w)
+        y2 = int((max_y + 1) * h / scan_h)
+
+        # Small padding avoids clipping map edges.
+        pad = max(1, int(min(w, h) * 0.005))
+        x1 = max(0, x1 - pad)
+        y1 = max(0, y1 - pad)
+        x2 = min(w, x2 + pad)
+        y2 = min(h, y2 + pad)
+
+        if x1 == 0 and y1 == 0 and x2 == w and y2 == h:
+            return image
+        if x2 - x1 < 32 or y2 - y1 < 32:
+            return image
+
+        return image.subsurface(pygame.Rect(x1, y1, x2 - x1, y2 - y1)).copy()
+
+    def set_map_background_by_index(self, index):
+        if not self.map_assets:
+            self.selected_map_index = 0
+            self.selected_map_name = "Default Tilemap"
+            self.map_background_path = None
+            self.map_background_surface = None
+            self.map_world_surface = None
+            return
+
+        self.selected_map_index = index % len(self.map_assets)
+        selected = self.map_assets[self.selected_map_index]
+        if selected is None:
+            self.selected_map_name = "Default Tilemap"
+            self.map_background_path = None
+            self.map_background_surface = None
+            self.map_world_surface = None
+            return
+
+        self.map_background_path = selected
+        raw_name = os.path.splitext(os.path.basename(selected))[0]
+        self.selected_map_name = raw_name.replace("_", " ")
+        if selected in self.map_surface_cache:
+            self.map_world_surface, self.map_background_surface = self.map_surface_cache[selected]
+            return
+        try:
+            image = pygame.image.load(selected).convert()
+            cropped = self.auto_crop_black_border(image)
+            self.map_world_surface = pygame.transform.smoothscale(cropped, (GRID_SIZE * TILE_SIZE, GRID_SIZE * TILE_SIZE))
+            self.map_background_surface = pygame.transform.smoothscale(cropped, (MAP_WIDTH, MAP_HEIGHT))
+            self.map_surface_cache[selected] = (self.map_world_surface, self.map_background_surface)
+        except Exception as exc:
+            print(f"[MAP LOAD ERROR] {selected}: {exc}")
+            self.map_background_surface = None
+            self.map_world_surface = None
 
     def build_chapters(self):
         def ring_walls():
@@ -649,11 +756,11 @@ class Game:
         }
         roof_items = [
             ItemPickup((6, 7), "Shotgun", "Một khẩu shotgun còn hoạt động.", "weapon", color=ORANGE),
-            ItemPickup((10, 31), "Bandage", "Bang gac tu tui cuu ho san thuong.", "heal", amount=25),
+            ItemPickup((10, 31), "Bandage", "Băng gạc từ túi cứu hộ sân thượng.", "heal", amount=25),
         ]
         roof_npcs = [
-            NPC("Phi cong", (38, 5), ["Toi chi lien lac duoc qua bo dam.", "Xuong cac tang duoi, mo cong san va goi tin hieu."], reward="radio", portrait_color=YELLOW, sprite_path="Sprites/Sprites_NPC/pilot.png",
-                quest="Nhat sung + ha 1 zombie -> cong xuong tang se mo"),
+            NPC("Phi công", (38, 5), ["Tôi chỉ liên lạc được qua bộ đàm.", "Xuống các tầng dưới, mở cổng sân và gọi tín hiệu."], reward="radio", portrait_color=YELLOW, sprite_path="Sprites/Sprites_NPC/pilot.png",
+                quest="Nhặt súng + hạ 1 zombie -> cổng xuống tầng sẽ mở"),
         ]
         roof_enemies = [
             (Goblin, (18, 7), "basic"),
@@ -690,8 +797,8 @@ class Game:
             (30, 26): "office_glass",
         }
         office_items = [
-            ItemPickup((35, 28), "Fuse", "Cau chi phu cho dien hanh lang.", "power", color=YELLOW),
-            ItemPickup((14, 20), "Katana", "Thanh kiem nhat gia: Sac lem va toc do cao.", "weapon", weapon_data={
+            ItemPickup((35, 28), "Fuse", "Cầu chì phụ cho điện hành lang.", "power", color=YELLOW),
+            ItemPickup((14, 20), "Katana", "Thanh kiếm Nhật gia: sắc lẹm và tốc độ cao.", "weapon", weapon_data={
                 "name": "Katana", "fire_rate": 2.5, "reload_time": 0.0,
                 "image_path": "Sprites/Sprites_Weapon/Katana.png",
                 "projectile_speed": 0, "damage": 110, "projectile_scale": (96, 96), "type": "melee",
@@ -700,11 +807,11 @@ class Game:
                     {"atlas": "Sprites/Sprites_Effect/Bullets/Introl Yellow Effect Bullet Impact Explosion 32x32.gif", "tile": (32, 32)},
                 ],
             }),
-            ItemPickup((24, 5), "Ammo", "Dan du tru tu phong nhan su.", "ammo", amount=18, color=WHITE),
+            ItemPickup((24, 5), "Ammo", "Đạn dự trữ từ phòng nhân sự.", "ammo", amount=18, color=WHITE),
         ]
         office_npcs = [
-            NPC("Bao ve Nam", (21, 17), ["Toi giu duoc phong camera nhung cua dang ket.", "Ha zombie dac biet de lay the tu, roi khoi phuc dien de mo loi xuong."], reward="map", portrait_color=BLUE, sprite_path="Sprites/Sprites_NPC/guard.png",
-                quest="Checkpoint: Ha du 10 zombie -> rơi Keycard. Sau do tim cau chi va bat hop dien."),
+            NPC("Bảo vệ Nam", (21, 17), ["Tôi giữ được phòng camera nhưng cửa đang kẹt.", "Hạ zombie đặc biệt để lấy thẻ từ, rồi khôi phục điện để mở lối xuống."], reward="map", portrait_color=BLUE, sprite_path="Sprites/Sprites_NPC/guard.png",
+                quest="Checkpoint: Hạ đủ 10 zombie -> rơi Keycard. Sau đó tìm cầu chì và bật hộp điện."),
         ]
         office_enemies = [
             (Goblin, (9, 17), "basic"),
@@ -749,15 +856,15 @@ class Game:
             (18, 26): "medical_trolley",
         }
         med_items = [
-            ItemPickup((6, 6), "Medkit", "Mot hop cuu thuong lon trong phong cap cuu.", "heal", amount=50),
-            ItemPickup((19, 20), "Armor Vest", "Ao giap nhe giup giam sat thuong.", "armor", amount=25, color=CYAN),
-            ItemPickup((10, 26), "Rocket Launcher", "Vu khi no manh de quet dam dong zombie.", "rocket_weapon", color=ORANGE),
-            ItemPickup((37, 33), "Control Fuse", "Thiet bi mo cong tang 1.", "exit", color=YELLOW),
-            ItemPickup((27, 8), "Rifle Ammo", "Dan hiem cho sung truong.", "ammo", amount=28, color=WHITE),
+            ItemPickup((6, 6), "Medkit", "Một hộp cứu thương lớn trong phòng cấp cứu.", "heal", amount=50),
+            ItemPickup((19, 20), "Armor Vest", "Áo giáp nhẹ giúp giảm sát thương.", "armor", amount=25, color=CYAN),
+            ItemPickup((10, 26), "Rocket Launcher", "Vũ khí nổ mạnh để quét đám đông zombie.", "rocket_weapon", color=ORANGE),
+            ItemPickup((37, 33), "Control Fuse", "Thiết bị mở cổng tầng 1.", "exit", color=YELLOW),
+            ItemPickup((27, 8), "Rifle Ammo", "Đạn hiếm cho súng trường.", "ammo", amount=28, color=WHITE),
         ]
         med_npcs = [
-            NPC("Y ta Linh", (18, 7), ["Toi van con giu duoc kho thuoc.", "Ha 3 zombie dac biet va mo loi xuong tang 1, toi se giup cau."], reward="medkit", portrait_color=GREEN, sprite_path="Sprites/Sprites_NPC/medic.png",
-                quest="Checkpoint: Ha 3 zombie dac biet -> mo duong xuong tang 1."),
+            NPC("Y tá Linh", (18, 7), ["Tôi vẫn còn giữ được kho thuốc.", "Hạ 3 zombie đặc biệt và mở lối xuống tầng 1, tôi sẽ giúp cậu."], reward="medkit", portrait_color=GREEN, sprite_path="Sprites/Sprites_NPC/medic.png",
+                quest="Checkpoint: Hạ 3 zombie đặc biệt -> mở đường xuống tầng 1."),
         ]
         med_enemies = [
             (Mushroom, (9, 21), "tank"),
@@ -786,13 +893,13 @@ class Game:
         # Gate lane from inside to yard
         carve(ground_blocked, 22, 20, 30, 26)
         ground_items = [
-            ItemPickup((7, 7), "Gate Switch", "Cong tac mo cong san.", "gate", color=ORANGE),
-            ItemPickup((34, 29), "Signal Beacon", "Thiet bi phat tin hieu cho truc thang.", "signal", color=YELLOW),
+            ItemPickup((7, 7), "Gate Switch", "Công tắc mở cổng sân.", "gate", color=ORANGE),
+            ItemPickup((34, 29), "Signal Beacon", "Thiết bị phát tín hiệu cho trực thăng.", "signal", color=YELLOW),
             ItemPickup((38, 36), "Rescue Flare", "Phao sang dung de xac nhan vi tri ha canh.", "flare", color=RED),
         ]
         ground_npcs = [
-            NPC("Ky thuat vien Huy", (17, 18), ["Toi giu duoc bo phat o san.", "Mo cong chinh, ra san va bat beacon. Quai ngoai san chi phat hien cau sau khi cong mo."], reward="shortcut", portrait_color=ORANGE, sprite_path="Sprites/Sprites_NPC/engineer.png",
-                quest="Checkpoint: Mo cong chinh -> quái ngoài sân xuất hiện. Bat beacon -> tru vung."),
+            NPC("Kỹ thuật viên Huy", (17, 18), ["Tôi giữ được bộ phát ở sân.", "Mở cổng chính, ra sân và bật beacon. Quái ngoài sân chỉ phát hiện cậu sau khi cổng mở."], reward="shortcut", portrait_color=ORANGE, sprite_path="Sprites/Sprites_NPC/engineer.png",
+                quest="Checkpoint: Mở cổng chính -> quái ngoài sân xuất hiện. Bật beacon -> trụ vững."),
         ]
         ground_enemies = [
             (Goblin, (18, 6), "basic"),
@@ -874,10 +981,10 @@ class Game:
         return [
             Chapter(
                 "roof",
-                "Chuong 1: Tang thuong",
-                "Tinh day giua tan the",
-                ["Mot vu no rung chuyen toa nha.", "Ban tinh day tren tang thuong, bo dam chi con tieng nhieu.", "Mot truc thang cuu ho dang do tin hieu tu duoi san."],
-                ["Nhat sung", "Lay bang gac", "Ha zombie dau tien", "Mo loi xuong tang 3"],
+                "Chương 1: Tầng thượng",
+                "Tỉnh dậy giữa tận thế",
+                ["Một vụ nổ rung chuyển tòa nhà.", "Bạn tỉnh dậy trên tầng thượng, bộ đàm chỉ còn tiếng nhiễu.", "Một trực thăng cứu hộ đang dò tín hiệu từ dưới sân."],
+                ["Nhặt súng", "Lấy băng gạc", "Hạ zombie đầu tiên", "Mở lối xuống tầng 3"],
                 (38, 34),
                 (4, 5),
                 roof_blocked,
@@ -886,18 +993,18 @@ class Game:
                 roof_npcs,
                 roof_enemies,
                 ORANGE,
-                "Phi cong: Neu con nghe thay toi, hay xuong cac tang duoi va mo cong san.",
-                quest_line="Thoat khoi san thuong: nhat sung, ha 1 zombie, mo cong xuong tang 3.",
+                "Phi công: Nếu còn nghe thấy tôi, hãy xuống các tầng dưới và mở cổng sân.",
+                quest_line="Thoát khỏi sân thượng: nhặt súng, hạ 1 zombie, mở cổng xuống tầng 3.",
                 spawn_pool=[],
                 max_alive_enemies=5,
                 spawn_interval_ms=999999,
             ),
             Chapter(
                 "office",
-                "Chuong 2: Tang 3",
-                "Khu van phong cu",
-                ["Dien hanh lang chap chon, van phong bien thanh me cung.", "Zombie bat dau di chuyen nhanh hon trong khong gian hep."],
-                ["Lay the tu", "Khoi phuc dien", "Noi chuyen voi bao ve", "Toi thang xuong tang 2"],
+                "Chương 2: Tầng 3",
+                "Khu văn phòng cũ",
+                ["Điện hành lang chập chờn, văn phòng biến thành mê cung.", "Zombie bắt đầu di chuyển nhanh hơn trong không gian hẹp."],
+                ["Lấy thẻ từ", "Khôi phục điện", "Nói chuyện với bảo vệ", "Tới thang xuống tầng 2"],
                 (37, 35),
                 (3, 34),
                 office_blocked,
@@ -906,18 +1013,18 @@ class Game:
                 office_npcs,
                 office_enemies,
                 BLUE,
-                "Bao ve Nam: Toi thay cau thang ky thuat o goc dong nam. Nhung phai co dien.",
-                quest_line="Tang 3: ha du 10 zombie lay the tu, khoi phuc dien, mo loi xuong tang 2.",
+                "Bảo vệ Nam: Tôi thấy cầu thang kỹ thuật ở góc đông nam. Nhưng phải có điện.",
+                quest_line="Tầng 3: hạ đủ 10 zombie lấy thẻ từ, khôi phục điện, mở lối xuống tầng 2.",
                 spawn_pool=[Goblin, DashingGoblin, FlyingEye],
                 max_alive_enemies=11,
                 spawn_interval_ms=3200,
             ),
             Chapter(
                 "medical",
-                "Chuong 3: Tang 2",
-                "Khu y te va kho chua",
-                ["Mui hoa chat va mau tron lan trong hanh lang.", "Day la noi con nhieu tiep te nhat, cung la noi nguy hiem nhat."],
-                ["Lay kho thuoc", "Diet 3 zombie dac biet", "Giup y ta", "Mo duong xuong tang 1"],
+                "Chương 3: Tầng 2",
+                "Khu y tế và kho chứa",
+                ["Mùi hóa chất và máu trộn lẫn trong hành lang.", "Đây là nơi còn nhiều tiếp tế nhất, cũng là nơi nguy hiểm nhất."],
+                ["Lấy kho thuốc", "Diệt 3 zombie đặc biệt", "Giúp y tá", "Mở đường xuống tầng 1"],
                 (39, 35),
                 (4, 34),
                 med_blocked,
@@ -926,8 +1033,8 @@ class Game:
                 med_npcs,
                 med_enemies,
                 GREEN,
-                "Y ta Linh: Cong tang 1 chi mo neu cap dien dung tuyen ky thuat.",
-                quest_line="Tang 2: thu thap vat tu, ha 3 zombie dac biet, mo duong xuong tang 1.",
+                "Y tá Linh: Cổng tầng 1 chỉ mở nếu cấp điện đúng tuyến kỹ thuật.",
+                quest_line="Tầng 2: thu thập vật tư, hạ 3 zombie đặc biệt, mở đường xuống tầng 1.",
                 spawn_pool=[Goblin, Mushroom, TeleportingMushroom, Skeleton],
                 max_alive_enemies=12,
                 spawn_interval_ms=3000,
@@ -935,24 +1042,24 @@ class Game:
             # --------- NEW CHAPTER: Basement ----------
             Chapter(
                 "basement",
-                "Chuong 4: Tang ham",
-                "May phat du phong va cua sat",
+                "Chương 4: Tầng hầm",
+                "Máy phát dự phòng và cửa sắt",
                 [
-                    "Khong khi am va mùi dau may xoc thang vao mui.",
-                    "Tieng kim loai keo len lanh song lung — ben duoi co thu gi do dang di chuyen.",
+                    "Không khí ẩm và mùi dầu máy xộc thẳng vào mũi.",
+                    "Tiếng kim loại kéo lên lạnh sống lưng — bên dưới có thứ gì đó đang di chuyển.",
                 ],
-                ["Tim ma cua", "Ha zombie dac biet", "Khoi dong may phat", "Mo cua den phong thi nghiem"],
+                ["Tìm mã cửa", "Hạ zombie đặc biệt", "Khởi động máy phát", "Mở cửa đến phòng thí nghiệm"],
                 (40, 35),
                 (4, 35),
                 basement_blocked,
                 basement_decor,
                 [
-                    ItemPickup((8, 34), "So tay ky thuat", "Trong so co ma cua phong may: 4821.", "code", color=WHITE),
-                    ItemPickup((36, 8), "Dan du tru", "Hop dan con moi trong tu ky thuat.", "ammo", amount=24, color=WHITE),
-                    ItemPickup((12, 10), "Ao giap", "Ao giap cu nhung van dung duoc.", "armor", amount=20, color=CYAN),
+                    ItemPickup((8, 34), "Sổ tay kỹ thuật", "Trong sổ có mã cửa phòng máy: 4821.", "code", color=WHITE),
+                    ItemPickup((36, 8), "Đạn dự trữ", "Hộp đạn còn mới trong tủ kỹ thuật.", "ammo", amount=24, color=WHITE),
+                    ItemPickup((12, 10), "Áo giáp", "Áo giáp cũ nhưng vẫn dùng được.", "armor", amount=20, color=CYAN),
                 ],
                 [
-                    NPC("Tho may Dung", (10, 26), ["May phat o phong may bi khoa ma.", "Tim so tay ky thuat, bat dien len thi cua sat se mo."], reward="shortcut", portrait_color=ORANGE, sprite_path="Sprites/Sprites_NPC/engineer.png"),
+                    NPC("Thợ máy Dũng", (10, 26), ["Máy phát ở phòng máy bị khóa mã.", "Tìm sổ tay kỹ thuật, bật điện lên thì cửa sắt sẽ mở."], reward="shortcut", portrait_color=ORANGE, sprite_path="Sprites/Sprites_NPC/engineer.png"),
                 ],
                 [
                     (Skeleton, (22, 30), "special"),
@@ -961,7 +1068,7 @@ class Game:
                     (EvilWizard, (36, 30), "ranged"),
                 ],
                 (160, 160, 200),
-                "Radio: Tang ham rat nguy hiem. Bat duoc dien la se mo duoc cua sat dan den phong thi nghiem.",
+                "Radio: Tầng hầm rất nguy hiểm. Bật được điện là sẽ mở được cửa sắt dẫn đến phòng thí nghiệm.",
                 spawn_pool=[Goblin, Skeleton, TeleportingMushroom],
                 max_alive_enemies=13,
                 spawn_interval_ms=2600,
@@ -969,24 +1076,24 @@ class Game:
             # --------- NEW CHAPTER: Lab ----------
             Chapter(
                 "lab",
-                "Chuong 5: Phong thi nghiem",
-                "Nguon goc dai dich",
+                "Chương 5: Phòng thí nghiệm",
+                "Nguồn gốc đại dịch",
                 [
-                    "Anh den nhap nhoang tren cac tủ lanh mau.",
-                    "Co the o day co thu gi do giup ban song sot lau hon.",
+                    "Ánh đèn nhấp nhoáng trên các tủ lạnh mẫu.",
+                    "Có thể ở đây có thứ gì đó giúp bạn sống sót lâu hơn.",
                 ],
-                ["Lay mau khang the", "Cuu bac si", "Mo loi ra sanh chinh"],
+                ["Lấy mẫu kháng thể", "Cứu bác sĩ", "Mở lối ra sảnh chính"],
                 (39, 35),
                 (3, 6),
                 lab_blocked,
                 lab_decor,
                 [
-                    ItemPickup((34, 10), "Mau khang the", "Mot ong mau duoc niem phong. Co the dung de pha che.", "antidote", color=GREEN),
-                    ItemPickup((8, 34), "Medkit", "Hop cuu thuong con day.", "heal", amount=50),
-                    ItemPickup((18, 30), "The tu an ninh", "Mo cua ra hanh lang chinh.", "keycard", color=BLUE),
+                    ItemPickup((34, 10), "Mẫu kháng thể", "Một ống mẫu được niêm phong. Có thể dùng để pha chế.", "antidote", color=GREEN),
+                    ItemPickup((8, 34), "Medkit", "Hộp cứu thương còn đầy.", "heal", amount=50),
+                    ItemPickup((18, 30), "Thẻ từ an ninh", "Mở cửa ra hành lang chính.", "keycard", color=BLUE),
                 ],
                 [
-                    NPC("Bac si Hoa", (12, 8), ["Cau tim thay ong mau roi sao?", "Hay mo cua an ninh, chung ta can ra khoi day ngay!"], reward="medkit", portrait_color=CYAN, sprite_path="Sprites/Sprites_NPC/doctor.png"),
+                    NPC("Bác sĩ Linh", (12, 8), ["Cậu tìm thấy ống mẫu rồi sao?", "Hãy mở cửa an ninh, chúng ta cần ra khỏi đây ngay!"], reward="medkit", portrait_color=CYAN, sprite_path="Sprites/Sprites_NPC/doctor.png"),
                 ],
                 [
                     (EvilWizard, (26, 8), "ranged"),
@@ -995,17 +1102,17 @@ class Game:
                     (DashingGoblin, (37, 18), "fast"),
                 ],
                 (120, 220, 200),
-                "Bac si: Neu lay duoc mau khang the, co the keo dai thoi gian song sot. Nhung hay ra khoi phong thi nghiem!",
+                "Bác sĩ: Nếu lấy được mẫu kháng thể, có thể kéo dài thời gian sống sót. Nhưng hãy ra khỏi phòng thí nghiệm!",
                 spawn_pool=[Goblin, DashingGoblin, FlyingEye, Skeleton],
                 max_alive_enemies=14,
                 spawn_interval_ms=2400,
             ),
             Chapter(
                 "ground",
-                "Chuong 6: Tang 1 - Sanh chinh",
-                "Diem nghen cuoi cung ben trong toa nha",
-                ["Ban da xuong toi tang tret. Coi bao dong vang doi khap sanh.", "Zombie dang tran vao qua cac cua kinh vo.", "Phai mo duoc cong chinh de ra san sau."],
-                ["Mo cong chinh", "Ha 2 zombie dac biet", "Tim loi ra san"],
+                "Chương 6: Tầng 1 - Sảnh chính",
+                "Điểm nghẽn cuối cùng bên trong tòa nhà",
+                ["Bạn đã xuống tới tầng trệt. Còi báo động vang dội khắp sảnh.", "Zombie đang tràn vào qua các cửa kính vỡ.", "Phải mở được cổng chính để ra sân sau."],
+                ["Mở cổng chính", "Hạ 2 zombie đặc biệt", "Tìm lối ra sân"],
                 (38, 36),
                 (5, 5),
                 ground_blocked,
@@ -1014,22 +1121,22 @@ class Game:
                 ground_npcs,
                 ground_enemies,
                 RED,
-                "Ky thuat vien Huy: Cong chinh dang ket. Toi se mo tu xa, hay giu chan chung!",
+                "Kỹ thuật viên Huy: Cổng chính đang kẹt. Tôi sẽ mở từ xa, hãy giữ chân chúng!",
                 spawn_pool=[Goblin, DashingGoblin, Skeleton],
                 max_alive_enemies=12,
                 spawn_interval_ms=2800,
             ),
             Chapter(
                 "escape",
-                "Chuong 7: San bay - Thoat hiem",
-                "Truc thang dang doi",
-                ["Bau troi ruc lua, truc thang cuu ho da o phia truoc.", "Hay bat den hieu beacon va tru vung cho den khi chung co the ha canh."],
-                ["Bat den hieu Beacon", "Tru vung trong 25 giay", "Ha boss Old Guardian", "Len truc thang"],
+                "Chương 7: Sân bay - Thoát hiểm",
+                "Trực thăng đang đợi",
+                ["Bầu trời rực lửa, trực thăng cứu hộ đã ở phía trước.", "Hãy bật đèn hiệu beacon và trụ vững cho đến khi chúng có thể hạ cánh."],
+                ["Bật đèn hiệu Beacon", "Trụ vững trong 25 giây", "Hạ boss Old Guardian", "Lên trực thăng"],
                 (40, 37),
                 (10, 10),
                 ring_walls(),
                 {(15, 15): "rock", (25, 25): "grass", (12, 30): "hut", (30, 12): "rock", (38, 36): "heli_pad"},
-                [ItemPickup((34, 29), "Rescue Flare", "Phao sang xac nhan vi tri.", "flare", color=RED)],
+                [ItemPickup((34, 29), "Rescue Flare", "Pháo sáng xác nhận vị trí.", "flare", color=RED)],
                 [],
                 [
                     (BigFlyingEye, (33, 35), {"type": "boss", "health": 150}),
@@ -1038,7 +1145,7 @@ class Game:
                     (EvilWizard, (10, 35), "ranged"),
                 ],
                 YELLOW,
-                "Phi cong: Toi thay beacon roi! Dang ha do cao, hay quet sach khu vuc!",
+                "Phi công: Tôi thấy beacon rồi! Đang hạ độ cao, hãy quét sạch khu vực!",
                 holdout_seconds=30,
                 chapter_type="holdout",
                 spawn_pool=[Goblin, DashingGoblin, Skeleton, EvilWizard, Mushroom],
@@ -1050,26 +1157,26 @@ class Game:
     def trailer_scenes(self):
         return [
             {
-                "title": "Thanh pho da sup do",
-                "subtitle": "Virus la bien ca khu trung tam thanh o zombie chi sau mot dem.",
+                "title": "Thành phố đã sụp đổ",
+                "subtitle": "Virus làm biến cả khu trung tâm thành ổ zombie chỉ sau một đêm.",
                 "accent": RED,
                 "art": [("player", 160, 360), ("eye", 590, 160), ("goblin", 770, 360)],
             },
             {
-                "title": "Tinh day tren tang thuong",
-                "subtitle": "Ban bi mac ket giua khoi lua, chi con tieng bo dam cuu ho vong lai.",
+                "title": "Tỉnh dậy trên tầng thượng",
+                "subtitle": "Bạn bị mắc kẹt giữa khói lửa, chỉ còn tiếng bộ đàm cứu hộ vọng lại.",
                 "accent": ORANGE,
                 "art": [("player", 220, 340), ("hut", 670, 340), ("eye", 760, 180)],
             },
             {
-                "title": "Xuong tung tang, mo duong song",
-                "subtitle": "Tim sung, vat tu, chia khoa va khoi phuc dien de mo loi thoat.",
+                "title": "Xuống từng tầng, mở đường sống",
+                "subtitle": "Tìm súng, vật tư, chìa khóa và khôi phục điện để mở lối thoát.",
                 "accent": BLUE,
                 "art": [("player", 170, 350), ("rocket", 540, 350), ("mortar", 760, 320)],
             },
             {
-                "title": "Tru vung toi chuyen bay cuoi",
-                "subtitle": "Ra san, bat den hieu va chong lai dot zombie cuoi cung de thoat khoi thanh pho.",
+                "title": "Trụ vững tới chuyến bay cuối",
+                "subtitle": "Ra sân, bật đèn hiệu và chống lại đợt zombie cuối cùng để thoát khỏi thành phố.",
                 "accent": YELLOW,
                 "art": [("player", 160, 360), ("mushroom", 620, 330), ("rocket", 800, 240)],
             },
@@ -1309,7 +1416,7 @@ class Game:
             ItemPickup(
                 (tile_x, tile_y),
                 weapon_data["name"],
-                f"Zombie da roi {weapon_data['name']}. Bam E de nhat.",
+                f"Zombie đã rơi {weapon_data['name']}. Bấm E để nhặt.",
                 "weapon_drop",
                 color=RARITY_COLORS.get(weapon_data.get("rarity", "common"), ORANGE),
                 weapon_data=weapon_data,
@@ -1364,17 +1471,17 @@ class Game:
                 },
                 equip_now=True,
             )
-            self.popup = "Da nhat Shotgun. Da chuyen sang sung moi."
-            self.queue_story_lines("Nhan vat chinh", ["Duoc roi, co them hoa luc roi.", "Giet 1 zombie nua la xong man khoi dong."], ORANGE)
+            self.popup = "Đã nhặt Shotgun. Đã chuyển sang súng mới."
+            self.queue_story_lines("Nhân vật chính", ["Được rồi, có thêm hỏa lực rồi.", "Giết 1 zombie nữa là xong màn khởi động."], ORANGE)
         elif item.item_type == "heal":
             self.player.heal(item.amount)
             self.mission.data["medkit_collected"] = True
             if self.chapter.id == "medical":
                 self.mission.data["supply_cache"] = True
                 self.mission.data["stage"] = max(int(self.mission.data.get("stage", 0) or 0), 1)
-                self.queue_story_lines("Y ta Linh", ["Lay them bang gac va thuoc tang luc neu thay.", "Tang duoi nguy hiem hon nhieu."], GREEN)
+                self.queue_story_lines("Y tá Linh Tây", ["Lấy thêm băng gạc và thuốc tăng lực nếu thấy.", "Tầng dưới nguy hiểm hơn nhiều."], GREEN)
         elif item.item_type == "ammo":
-            self.popup = f"Nhat {item.amount} vien dan du tru."
+            self.popup = f"Nhặt {item.amount} viên đạn dự trữ."
             # Feed reserve ammo into current weapon if applicable
             w = self.weapon_manager.current_weapon
             if w and not getattr(w, "melee", False):
@@ -1384,7 +1491,7 @@ class Game:
             self.mission.data["supply_cache"] = True
             if self.chapter.id == "medical":
                 self.mission.data["stage"] = max(int(self.mission.data.get("stage", 0) or 0), 1)
-            self.queue_story_dialog("Hero", "Ao giap nay se giup minh song dai hon.", CYAN)
+            self.queue_story_dialog("Hero", "Áo giáp này sẽ giúp mình sống dai hơn.", CYAN)
         elif item.item_type == "rocket_weapon":
             self.unlock_weapon(
                 {
@@ -1400,63 +1507,63 @@ class Game:
                 },
                 equip_now=True,
             )
-            self.popup = "Da mo khoa Rocket Launcher va chuyen sang vu khi moi."
-            self.queue_story_lines("Y ta Linh", ["Phia duoi dang co dam dong rat lon.", "Lay vu khi no nay, no se giup cau mo duong."], GREEN)
+            self.popup = "Đã mở khóa Rocket Launcher và chuyển sang vũ khí mới."
+            self.queue_story_lines("Y tá Linh", ["Phía dưới đang có đám đông rất lớn.", "Lấy vũ khí nổ này, nó sẽ giúp cậu mở đường."], GREEN)
         elif item.item_type == "weapon_drop":
             weapon_data = item.weapon_data or dict(random.choice(WEAPON_DROP_POOL))
             was_new = self.unlock_weapon(weapon_data, equip_now=True)
             if was_new:
-                self.popup = f"Da nhat {weapon_data['name']}. Da trang bi ngay."
+                self.popup = f"Da nhat {weapon_data['name']}. Đã trang bị ngay."
             else:
-                self.popup = f"Ban da co {weapon_data['name']}. Da chuyen sang vu khi nay."
+                self.popup = f"Bạn đã có {weapon_data['name']}. Đã chuyển sang vũ khí này."
         elif item.item_type == "keycard":
             self.mission.data["keycard_collected"] = True
-            self.queue_story_lines("Bao ve Nam", ["Tot, do la the tu cua phong an ninh.", "Mang no toi hop dien ben phai."], BLUE)
+            self.queue_story_lines("Bảo vệ Nam", ["Tốt, đó là thẻ từ của phòng an ninh.", "Mang nó tới hộp điện bên phải."], BLUE)
             if self.chapter.id in {"office", "lab"}:
                 self.mission.data["stage"] = max(int(self.mission.data.get("stage", 0) or 0), 2 if self.chapter.id == "office" else 2)
         elif item.item_type == "code":
             # Used in basement
             self.mission.data["basement_code"] = True
-            self.popup = "Da lay duoc ma cua: 4821. Hay toi phong may va khoi dong may phat."
-            self.queue_story_dialog("Hero", "Ma cua phong may... minh can tim bang dieu khien dien.", ORANGE)
+            self.popup = "Đã lấy được mã cửa: 4821. Hãy tới phòng máy và khởi động máy phát."
+            self.queue_story_dialog("Hero", "Mã cửa phòng máy... mình cần tìm bảng điều khiển điện.", ORANGE)
             if self.chapter.id == "basement":
                 self.mission.data["stage"] = max(int(self.mission.data.get("stage", 0) or 0), 1)
         elif item.item_type == "antidote":
             # Used in lab
             self.mission.data["antidote_collected"] = True
-            self.popup = "Da lay mau khang the. Co the dung de keo dai suc ben."
-            self.queue_story_lines("Bac si Hoa", ["Tot! Day la mau quan trong.", "Gio mo cua an ninh va thoat ra sanh chinh!"], CYAN)
+            self.popup = "Đã lấy mẫu kháng thể. Có thể dùng để kéo dài sức bền."
+            self.queue_story_lines("Bác sĩ Hoa", ["Tốt! Đây là mẫu quan trọng.", "Giờ mở cửa an ninh và thoát ra sảnh chính!"], CYAN)
             if self.chapter.id == "lab":
                 self.mission.data["stage"] = max(int(self.mission.data.get("stage", 0) or 0), 2)
         elif item.item_type == "power":
-            self.popup = "Da lay cau chi. Toi hop dien de khoi phuc nguon."
-            self.queue_story_dialog("Radio", "Dien phu dang o trang thai offline. Hay lap cau chi ngay.", YELLOW)
+            self.popup = "Đã lấy cầu chì. Tới hộp điện để khôi phục nguồn."
+            self.queue_story_dialog("Radio", "Điện phụ đang ở trạng thái offline. Hãy lắp cầu chì ngay.", YELLOW)
             if self.chapter.id == "office":
                 self.mission.data["fuse_collected"] = True
                 self.mission.data["stage"] = max(int(self.mission.data.get("stage", 0) or 0), 3)
         elif item.item_type == "exit":
             self.mission.data["supply_cache"] = True
-            self.popup = "Thiet bi dieu khien cong da co trong tay."
-            self.queue_story_dialog("Hero", "Mo duoc cong tang 1 roi. Phai tiep tuc di chuyen.", ORANGE)
+            self.popup = "Thiết bị điều khiển cổng đã có trong tay."
+            self.queue_story_dialog("Hero", "Mở được cổng tầng 1 rồi. Phải tiếp tục di chuyển.", ORANGE)
             if self.chapter.id == "medical":
                 self.mission.data["control_fuse_collected"] = True
                 self.mission.data["stage"] = max(int(self.mission.data.get("stage", 0) or 0), 3)
         elif item.item_type == "gate":
             self.mission.data["gate_opened"] = True
-            self.popup = "Cong san da mo. Di toi beacon."
+            self.popup = "Cổng sân đã mở. Đi tới beacon."
             if self.chapter.id == "ground":
                 self.remove_gate_collision(self.yard_gate_tile)
                 self.spawn_particles(self.yard_gate_tile[0] * TILE_SIZE + 8, self.yard_gate_tile[1] * TILE_SIZE + 8, YELLOW, count=18)
                 play_sound_effect("sfx_gate_open")
             else:
                 self.remove_gate_collision(item.grid_pos)
-            self.queue_story_lines("Ky thuat vien Huy", ["Cong san da mo.", "Toi se giu he thong dien on dinh, cau ra beacon di."], ORANGE)
+            self.queue_story_lines("Kỹ thuật viên Huy", ["Cổng sân đã mở.", "Tôi sẽ giữ hệ thống điện ổn định, cậu ra beacon đi."], ORANGE)
         elif item.item_type == "signal":
             self.mission.data["signal_started"] = True
             self.beacon_started_at = pygame.time.get_ticks()
             self.holdout_until = self.beacon_started_at + self.chapter.holdout_seconds * 1000
-            self.popup = "Tin hieu cuu ho da phat. Tru vung toi khi truc thang toi."
-            self.queue_story_lines("Phi cong", ["Da nhan duoc tin hieu.", "Giu vi tri, toi se ha canh trong it phut nua."], YELLOW)
+            self.popup = "Tín hiệu cứu hộ đã phát. Trụ vững tới khi trực thăng tới."
+            self.queue_story_lines("Phi công", ["Đã nhận được tín hiệu.", "Giữ vị trí, tôi sẽ hạ cánh trong ít phút nữa."], YELLOW)
         elif item.item_type == "flare":
             self.popup = "Phao sang da san sang cho diem ha canh."
         elif item.item_type == "money":
@@ -1486,20 +1593,20 @@ class Game:
             if self.mission.data.get("keycard_collected") and self.mission.data.get("fuse_collected"):
                 self.mission.data["power_restored"] = True
                 self.mission.data["gate_opened"] = True
-                self.popup = "Dien da tro lai. Thang ky thuat tang 2 da mo."
+                self.popup = "Điện đã trở lại. Thang kỹ thuật tầng 2 đã mở."
                 self.remove_gate_collision((37, 35))
                 self.mission.data["stage"] = max(int(self.mission.data.get("stage", 0) or 0), 4)
             else:
-                self.popup = "Can Keycard + Fuse truoc khi kich hoat lai hanh lang."
+                self.popup = "Cần Keycard + Fuse trước khi kích hoạt lại hành lang."
         elif cid == "medical":
             # Require picking up Control Fuse first
             if self.mission.data.get("control_fuse_collected"):
                 self.mission.data["gate_opened"] = True
-                self.popup = "Loi xuong tang 1 da duoc mo."
+                self.popup = "Lối xuống tầng 1 đã được mở."
                 self.remove_gate_collision((39, 35))
                 self.mission.data["stage"] = max(int(self.mission.data.get("stage", 0) or 0), 3)
             else:
-                self.popup = "Can nhat thiet bi mo cong (Control Fuse) truoc."
+                self.popup = "Cần nhặt thiết bị mở cổng (Control Fuse) trước."
         elif cid == "basement":
             if self.mission.data.get("basement_code", False) and self.mission.data.get("special_kills", 0) >= 2:
                 self.mission.data["power_restored"] = True
@@ -1508,20 +1615,20 @@ class Game:
                 self.remove_gate_collision((40, 35))
                 self.mission.data["stage"] = max(int(self.mission.data.get("stage", 0) or 0), 3)
             else:
-                self.popup = "Can ma cua + ha du 2 zombie dac biet truoc."
+                self.popup = "Cần mã cửa + hạ đủ 2 zombie đặc biệt trước."
         elif cid == "lab":
             if self.mission.data.get("antidote_collected", False) and self.mission.data.get("keycard_collected", False):
                 self.mission.data["gate_opened"] = True
-                self.popup = "Cua an ninh mo. Duong ra sanh chinh da thong."
+                self.popup = "Cửa an ninh mở. Đường ra sảnh chính đã thông."
                 self.remove_gate_collision((39, 35))
                 self.mission.data["stage"] = max(int(self.mission.data.get("stage", 0) or 0), 3)
             else:
-                self.popup = "Can the tu va mau khang the truoc khi mo cua an ninh."
+                self.popup = "Cần thẻ từ và mẫu kháng thể trước khi mở cửa an ninh."
         elif cid == "ground":
             self.mission.data["signal_started"] = True
             self.beacon_started_at = pygame.time.get_ticks()
             self.holdout_until = self.beacon_started_at + self.chapter.holdout_seconds * 1000
-            self.popup = "Beacon da bat. Giu vi tri."
+            self.popup = "Beacon đã bật. Giữ vị trí."
         self.popup_timer = pygame.time.get_ticks() + 2800
 
     def open_dialog(self, npc):
@@ -1534,14 +1641,14 @@ class Game:
             self.saved_npcs += 1
             self.mission.data["npc_saved"] += 1
             if npc.reward == "map":
-                self.popup = "Ban nhan duoc so do an ninh tang hien tai."
+                self.popup = "Bạn nhận được sơ đồ an ninh tầng hiện tại."
             elif npc.reward == "medkit":
                 self.player.heal(20)
-                self.popup = "Y ta Linh hoi mau cho ban."
+                self.popup = "Y tá Linh hồi máu cho bạn."
             elif npc.reward == "shortcut":
-                self.popup = "Ky thuat vien danh dau duong tat ra san."
+                self.popup = "Kỹ thuật viên đánh dấu đường tắt ra sân."
             elif npc.reward == "radio":
-                self.popup = "Bo dam bat duoc kenh cuu ho on dinh hon."
+                self.popup = "Bộ đàm bắt được kênh cứu hộ ổn định hơn."
             self.popup_timer = pygame.time.get_ticks() + 2600
 
     def update(self):
@@ -1617,7 +1724,7 @@ class Game:
                     self.state = "win"
 
             if self.player.health <= 0:
-                self.end_reason = "Ban da bi zombie ap dao truoc khi thoat duoc khoi thanh pho."
+                self.end_reason = "Bạn đã bị zombie áp đảo trước khi thoát được khỏi thành phố."
                 self.state = "lose"
 
     def update_frenzy(self, shot_fired):
@@ -1707,7 +1814,7 @@ class Game:
                     # Guaranteed: kill 10 zombies -> keycard drops (not RNG)
                     if self.mission.data.get("zombies_killed", 0) >= 10 and "office_keycard_drop" not in self.story_flags:
                         # Only mark dropped when we successfully place it
-                        if self.spawn_mission_item_near(etile, "keycard", "Keycard", "The tu an ninh roi ra sau khi ha 10 zombie.", color=BLUE, radius=3):
+                        if self.spawn_mission_item_near(etile, "keycard", "Keycard", "Thẻ từ an ninh roi ra sau khi ha 10 zombie.", color=BLUE, radius=3):
                             self.story_flags.add("office_keycard_drop")
                             self.popup = "Da ha du 10 zombie: Keycard da roi!"
                             self.popup_timer = pygame.time.get_ticks() + 2200
@@ -1719,7 +1826,7 @@ class Game:
                 if self.chapter.id == "lab" and not self.mission.data.get("antidote_collected", False):
                     # First special kill drops antidote vial
                     if entry.archetype == "special":
-                        if self.spawn_mission_item_near(etile, "antidote", "Mau khang the", "Ong mau roi tu ke tan cong.", color=GREEN, radius=3):
+                        if self.spawn_mission_item_near(etile, "antidote", "Mẫu kháng thể", "Ống mẫu rơi từ kẻ tấn công.", color=GREEN, radius=3):
                             self.popup = "Co ong mau khang the roi ra!"
                             self.popup_timer = pygame.time.get_ticks() + 2200
                             self.mission.data["stage"] = max(int(self.mission.data.get("stage", 0) or 0), 1)
@@ -1752,19 +1859,19 @@ class Game:
             self.queue_story_lines("Hero", ["Hết rồi... tạm an toàn.", "Mình phải kiếm đường xuống dưới."], ORANGE)
             self.queue_story_lines("Radio", ["Tín hiệu yếu. Cố giữ bình tĩnh.", "Đi theo đèn chỉ dẫn, tránh xa bóng tối."], YELLOW)
         elif cid == "office":
-            self.queue_story_lines("Bao ve Nam", ["Khu này sạch. Cậu làm tốt lắm.", "Nhớ nhặt Keycard, nó mở cửa an ninh."], BLUE)
+            self.queue_story_lines("Bảo vệ Linh", ["Khu này sạch. Cậu làm tốt lắm.", "Nhớ nhặt Keycard, nó mở cửa an ninh."], BLUE)
             self.queue_story_lines("Hero", ["Rõ. Mình sẽ tìm trong xác bọn đặc biệt."], ORANGE)
         elif cid == "medical":
-            self.queue_story_lines("Y ta Linh", ["Cậu vẫn ổn chứ?", "Lấy đồ y tế rồi đi nhanh, chúng sẽ quay lại."], GREEN)
+            self.queue_story_lines("Y tá Linh Tây", ["Cậu vẫn ổn chứ?", "Lấy đồ y tế rồi đi nhanh, chúng sẽ quay lại."], GREEN)
             self.queue_story_lines("Hero", ["Ừ. Mình đi đây."], ORANGE)
         elif cid == "basement":
             self.queue_story_lines("Radio", ["Dưới tầng hầm có máy phát.", "Khởi động được nó thì đường thoát sẽ mở."], YELLOW)
             self.queue_story_lines("Hero", ["Nghe như kế hoạch duy nhất."], ORANGE)
         elif cid == "lab":
-            self.queue_story_lines("Nha nghien cuu An", ["Tốt! Khu lab đã yên.", "Mau khang the phải được mang ra ngoài ngay."], CYAN)
+            self.queue_story_lines("Nhà nghiên cứu An", ["Tốt! Khu lab đã yên.", "Mẫu kháng thể phải được mang ra ngoài ngay."], CYAN)
             self.queue_story_lines("Hero", ["Mở cổng. Mình ra sảnh."], ORANGE)
         elif cid == "ground":
-            self.queue_story_lines("Phi cong", ["Khu vực tạm sạch!", "Bật beacon lên, tôi sẽ hạ độ cao."], YELLOW)
+            self.queue_story_lines("Phi công", ["Khu vực tạm sạch!", "Bật beacon lên, tôi sẽ hạ độ cao."], YELLOW)
             self.queue_story_lines("Hero", ["Đã rõ. Mình giữ vị trí."], ORANGE)
         else:
             self.queue_story_lines("Hero", ["Khu này sạch... đi tiếp thôi."], ORANGE)
@@ -1772,7 +1879,7 @@ class Game:
     def handle_progression(self):
         if self.chapter.id == "roof" and self.mission.data["zombies_killed"] >= 1 and "roof_first_kill" not in self.story_flags:
             self.story_flags.add("roof_first_kill")
-            self.queue_story_lines("Nhan vat chinh", ["Con dau tien da guc.", "Minh phai lay do roi mo loi xuong ngay."], ORANGE)
+            self.queue_story_lines("Nhân vật chính", ["Con đầu tiên đã gục.", "Mình phải lấy đồ rồi mở lối xuống ngay."], ORANGE)
         if self.chapter.id == "roof" and self.mission.data["weapon_collected"] and self.mission.data["zombies_killed"] >= 1:
             # Chapter 1: open gate immediately after the simple starter objectives
             self.mission.data["medkit_collected"] = True
@@ -1781,7 +1888,7 @@ class Game:
             self.mission.data["stage"] = max(int(self.mission.data.get("stage", 0) or 0), 2)
         if self.chapter.id == "office" and self.mission.data["power_restored"] and "office_power" not in self.story_flags:
             self.story_flags.add("office_power")
-            self.queue_story_lines("Bao ve Nam", ["Dien da len. Camera cho thay cau thang ky thuat da mo.", "Di nhanh len, chung dang ap sat tu hanh lang sau."], BLUE)
+            self.queue_story_lines("Bảo vệ Linh", ["Điện đã lên. Camera cho thấy cầu thang kỹ thuật đã mở.", "Đi nhanh lên, chúng đang áp sát từ hành lang sau."], BLUE)
 
         # Failsafe: if player reached 10 kills but keycard never spawned (blocked tile etc)
         if self.chapter.id == "office" and not self.mission.data.get("keycard_collected", False):
@@ -1789,8 +1896,8 @@ class Game:
                 has_keycard_on_ground = any((not it.collected) and it.item_type == "keycard" for it in self.chapter.items)
                 if not has_keycard_on_ground:
                     ptile = self.current_tile()
-                    if self.spawn_mission_item_near(ptile, "keycard", "Keycard", "The tu an ninh (failsafe).", color=BLUE, radius=2):
-                        self.popup = "Keycard da xuat hien gan ban!"
+                    if self.spawn_mission_item_near(ptile, "keycard", "Keycard", "Thẻ từ an ninh (failsafe).", color=BLUE, radius=2):
+                        self.popup = "Keycard đã xuất hiện gần bạn!"
                         self.popup_timer = pygame.time.get_ticks() + 2200
                         self.mission.data["stage"] = max(int(self.mission.data.get("stage", 0) or 0), 1)
 
@@ -1799,31 +1906,31 @@ class Game:
             has_on_ground = any((not it.collected) and it.item_type == "antidote" for it in self.chapter.items)
             if self.mission.data.get("special_kills", 0) >= 1 and not has_on_ground:
                 ptile = self.current_tile()
-                if self.spawn_mission_item_near(ptile, "antidote", "Mau khang the", "Mau khang the (failsafe).", color=GREEN, radius=2):
-                    self.popup = "Mau khang the da xuat hien gan ban!"
+                if self.spawn_mission_item_near(ptile, "antidote", "Mẫu kháng thể", "Mẫu kháng thể (failsafe).", color=GREEN, radius=2):
+                    self.popup = "Mẫu kháng thể đã xuất hiện gần bạn!"
                     self.popup_timer = pygame.time.get_ticks() + 2200
                     self.mission.data["stage"] = max(int(self.mission.data.get("stage", 0) or 0), 1)
         if self.chapter.id == "medical" and self.mission.data["special_kills"] >= 2 and "medical_warning" not in self.story_flags:
             self.story_flags.add("medical_warning")
-            self.queue_story_lines("Y ta Linh", ["Co loai dot bien dang di trong kho.", "Dung doi mat qua lau, no rat trau."], GREEN)
+            self.queue_story_lines("Y tá Linh", ["Có loại đột biến đang đi trong kho.", "Đừng đối mặt quá lâu, nó rất trâu."], GREEN)
         if self.chapter.id == "medical" and self.mission.data["special_kills"] >= 3:
             self.mission.data["specials_cleared"] = True
         if self.chapter.id == "ground" and self.mission.data["signal_started"] and pygame.time.get_ticks() >= self.holdout_until:
             self.mission.data["holdout_complete"] = True
         if self.chapter.id == "ground" and self.mission.data["signal_started"] and "ground_hold" not in self.story_flags:
             self.story_flags.add("ground_hold")
-            self.queue_story_lines("Phi cong", ["Toi dang ha do cao.", "Dung de boss dot bien ap sat beacon."], YELLOW)
+            self.queue_story_lines("Phi công", ["Tôi đang hạ độ cao.", "Đừng để boss đột biến áp sát beacon."], YELLOW)
             
         if self.chapter.id == "escape" and self.mission.data["boss_down"]:
             if not getattr(self, "countdown_started", False):
                 self.countdown_started = True
                 self.holdout_until = pygame.time.get_ticks() + 30 * 1000  # 30 giây
-                self.queue_story_lines("Phi cong", ["Da xac nhan muc tieu nguy hiem bi ha.", "Dang bay toi vi tri. Giu vung trong 30 giay!"], YELLOW)
+                self.queue_story_lines("Phi công", ["Đã xác nhận mục tiêu nguy hiểm bị hạ.", "Đang bay tới vị trí. Giữ vững trong 30 giây!"], YELLOW)
 
             if getattr(self, "countdown_started", False) and pygame.time.get_ticks() >= self.holdout_until and not getattr(self, "rescue_arrived", False):
                 self.rescue_arrived = True
                 self.mission.data["helicopter_arrived"] = True
-                self.queue_story_lines("Phi cong", ["Truc thang da ha canh! Len nhanh nao!"], YELLOW)
+                self.queue_story_lines("Phi công", ["Trực thăng đã hạ cánh! Lên nhanh nào!"], YELLOW)
 
         # Auto unlock exit gate when objectives done
         if self.mission.complete() and not self.exit_unlocked:
@@ -2026,7 +2133,7 @@ class Game:
             return "Mo cong chính"
         if not self.mission.data["signal_started"]:
             return "Kích hoạt beacon"
-        return "Ra diem truc thang"
+        return "Ra điểm trực thăng"
 
     def auto_select_hint_mode(self):
         cid = self.chapter.id
@@ -2185,6 +2292,7 @@ class Game:
     def render_world(self, surface):
         # Get visible tile range from camera
         min_tx, max_tx, min_ty, max_ty = self.camera.get_visible_tile_range(TILE_SIZE)
+        custom_map_active = self.map_world_surface is not None
         
         # 1. Background Backdrop
         self.draw_chapter_backdrop(surface)
@@ -2198,10 +2306,14 @@ class Game:
 
         for ty in range(min_ty, max_ty + 1):
             for tx in range(min_tx, max_tx + 1):
-                base_tile = base_2 if (tx * 3 + ty * 5) % 11 == 0 else base_1
                 sx, sy = self.camera.world_to_screen(tx * TILE_SIZE, ty * TILE_SIZE)
-                surface.blit(base_tile, (sx, sy))
-                
+                if custom_map_active:
+                    src_rect = pygame.Rect(tx * TILE_SIZE, ty * TILE_SIZE, TILE_SIZE, TILE_SIZE)
+                    surface.blit(self.map_world_surface, (sx, sy), src_rect)
+                else:
+                    base_tile = base_2 if (tx * 3 + ty * 5) % 11 == 0 else base_1
+                    surface.blit(base_tile, (sx, sy))
+
                 if (tx, ty) in self.current_blocked:
                     # Draw solid wall tile first (clean readable walls)
                     surface.blit(wall_tile, (sx, sy))
@@ -2390,7 +2502,7 @@ class Game:
         pygame.draw.line(screen, self.chapter.chapter_color, (MAP_WIDTH + 1, 0), (MAP_WIDTH + 1, SCREEN_HEIGHT), 3)
 
         header_rect = pygame.Rect(MAP_WIDTH + 14, 14, SIDEBAR_WIDTH - 28, 84)
-        self.draw_card(header_rect, self.chapter.chapter_color, title="San Thuong Cuoi", subtitle=self.chapter.title)
+        self.draw_card(header_rect, self.chapter.chapter_color, title="Sân Thượng Cuối", subtitle=self.chapter.title)
 
         stat_rect = pygame.Rect(MAP_WIDTH + 14, 108, SIDEBAR_WIDTH - 28, 98)
         self.draw_card(stat_rect, RED)
@@ -2403,7 +2515,7 @@ class Game:
         screen.blit(self.font_small.render(self.weapon_manager.current_weapon.name, True, WHITE), (stat_rect.x + 16, stat_rect.y + 72))
 
         objective_rect = pygame.Rect(MAP_WIDTH + 14, 216, SIDEBAR_WIDTH - 28, 86)
-        self.draw_card(objective_rect, YELLOW, title=f"Goi y: {self.hint_modes[self.hint_mode_index]}", subtitle=self.objective_label())
+        self.draw_card(objective_rect, YELLOW, title=f"Gợi ý: {self.hint_modes[self.hint_mode_index]}", subtitle=self.objective_label())
 
         quest_rect = pygame.Rect(MAP_WIDTH + 14, 312, SIDEBAR_WIDTH - 28, 120)
         quest_title = "Quest"
@@ -2420,24 +2532,24 @@ class Game:
                 yy += 18
 
         minimap_frame = pygame.Rect(MAP_WIDTH + 14, 442, SIDEBAR_WIDTH - 28, 214)
-        self.draw_card(minimap_frame, self.chapter.chapter_color, title="Minimap", subtitle="Muc tieu va duong di")
+        self.draw_card(minimap_frame, self.chapter.chapter_color, title="Minimap", subtitle="Mục tiêu và đường đi")
         minimap_rect = pygame.Rect(minimap_frame.x + 12, minimap_frame.y + 44, minimap_frame.width - 24, 152)
         self.draw_minimap(minimap_rect)
 
         info_rect = pygame.Rect(MAP_WIDTH + 14, 666, SIDEBAR_WIDTH - 28, 86)
-        self.draw_card(info_rect, CYAN, title="Thong tin", subtitle=f"Zombie: {self.kill_count}  |  NPC: {self.saved_npcs}")
+        self.draw_card(info_rect, CYAN, title="Thông tin", subtitle=f"Zombie: {self.kill_count}  |  NPC: {self.saved_npcs}")
         y = info_rect.y + 48
         stats = [
-            "Chuot trai ban  |  E nhat",
-            "Q doi sung  |  Tu dong qua cong",
-            f"Thuat toan: {self.hint_modes[self.hint_mode_index]}",
+            "Chuột trái bắn  |  E nhặt",
+            "Q đổi súng  |  Tự động qua cổng",
+            f"Thuật toán: {self.hint_modes[self.hint_mode_index]}",
         ]
         for line in stats:
             screen.blit(self.font_small.render(line, True, SOFT), (info_rect.x + 14, y))
             y += 18
 
         asset_rect = pygame.Rect(MAP_WIDTH + 14, 752, SIDEBAR_WIDTH - 28, 40)
-        self.draw_card(asset_rect, ORANGE, title="Loadout & Ho tro", subtitle="Card asset dang dung")
+        self.draw_card(asset_rect, ORANGE, title="Loadout & Hỗ trợ", subtitle="Card asset đang dùng")
         # (Cards hidden to make room for quest tracker)
 
     def draw_minimap(self, rect):
@@ -2619,7 +2731,7 @@ class Game:
             pygame.draw.rect(screen, YELLOW, (rect.x + tile[0] * scale, rect.y + tile[1] * scale, scale, scale), 1)
         px, py = self.current_tile()
         pygame.draw.circle(screen, WHITE, (int(rect.x + px * scale), int(rect.y + py * scale)), 5)
-        screen.blit(self.font_big.render("Ban Do Chien Thuat", True, WHITE), (rect.x + 18, rect.y - 34))
+        screen.blit(self.font_big.render("Bản Đồ Chiến Thuật", True, WHITE), (rect.x + 18, rect.y - 34))
 
     def draw_menu(self):
         for y in range(0, SCREEN_HEIGHT, 32):
@@ -2630,36 +2742,62 @@ class Game:
         screen.blit(self.font_title.render("LAST ROOF", True, WHITE), (120, 110))
         screen.blit(self.font_big.render("Escape City", True, ORANGE), (124, 164))
         menu_lines = [
-            "ENTER  Xem trailer & bat dau",
-            "H      How To Play",
-            "ESC    Thoat",
+            "ENTER  Xem trailer và bắt đầu",
+            "H      Hướng dẫn chơi",
+            "<- ->  Chọn map",
+            "ESC    Thoát",
         ]
         y = 280
         for line in menu_lines:
             screen.blit(self.font_big.render(line, True, WHITE), (126, y))
             y += 44
         teaser = [
-            "Sinh ton 2D theo chuong, co NPC va he goi y duong di.",
-            "Bam TAB trong game de doi BFS / DFS / SAFE / A*.",
+            "Sinh tồn 2D theo chương, có NPC và hệ gợi ý đường đi.",
+            "Bấm TAB trong game để đổi BFS / DFS / SAFE / A*.",
+            "Tiếng Việt có dấu: ă â ê ô ơ ư đ.",
         ]
         y = 500
         for line in teaser:
             screen.blit(self.font.render(line, True, WHITE), (126, y))
             y += 28
+
+        map_rect = pygame.Rect(520, 390, 560, 330)
+        pygame.draw.rect(screen, PANEL, map_rect)
+        pygame.draw.rect(screen, ORANGE, map_rect, 2)
+        screen.blit(self.font_big.render("Map Selector", True, ORANGE), (map_rect.x + 18, map_rect.y + 16))
+        screen.blit(self.font_small.render(f"Map đang chọn: {self.selected_map_name}", True, WHITE), (map_rect.x + 18, map_rect.y + 66))
+        screen.blit(self.font_small.render("Phím mũi tên trái/phải để đổi map", True, SOFT), (map_rect.x + 18, map_rect.y + 88))
+
+        list_top = map_rect.y + 118
+        total = len(self.map_assets)
+        start = max(0, min(self.selected_map_index - 2, max(0, total - 5)))
+        for idx in range(start, min(total, start + 5)):
+            path = self.map_assets[idx]
+            name = "Default Tilemap" if path is None else os.path.splitext(os.path.basename(path))[0]
+            color = YELLOW if idx == self.selected_map_index else WHITE
+            prefix = ">" if idx == self.selected_map_index else " "
+            screen.blit(self.font_small.render(f"{prefix} {name}", True, color), (map_rect.x + 18, list_top))
+            list_top += 28
+
+        if self.map_background_surface is not None:
+            preview = pygame.transform.smoothscale(self.map_background_surface, (240, 140))
+            preview_rect = pygame.Rect(map_rect.right - 258, map_rect.y + 160, 240, 140)
+            screen.blit(preview, preview_rect.topleft)
+            pygame.draw.rect(screen, WHITE, preview_rect, 1)
         if self.show_help:
             help_rect = pygame.Rect(520, 100, 330, 280)
             pygame.draw.rect(screen, PANEL, help_rect)
             pygame.draw.rect(screen, CYAN, help_rect, 2)
             lines = [
-                "WASD: Di chuyen",
-                "E: Tuong tac / nhat do",
-                "Q / Lan chuot: Doi sung",
-                "1-2-3: Chon nhanh sung",
-                "B: Mo shop vat pham",
-                "TAB: Doi thuat toan tim duong",
-                "M: Mo minimap lon",
-                "ESC: Tam dung",
-                "Muc tieu moi chuong o bang ben phai",
+                "WASD: Di chuyển",
+                "E: Tương tác / nhặt đồ",
+                "Q / Lăn chuột: Đổi súng",
+                "1-2-3: Chọn nhanh súng",
+                "B: Mở shop vật phẩm",
+                "TAB: Đổi thuật toán tìm đường",
+                "M: Mở minimap lớn",
+                "ESC: Tạm dừng",
+                "Mục tiêu mỗi chương ở bảng bên phải",
             ]
             yy = help_rect.y + 26
             for line in lines:
@@ -2914,7 +3052,7 @@ class Game:
             card_rect = pygame.Rect(cx, cy, 290, 115)
             if card_rect.collidepoint(mx, my):
                 if self.money < 1:
-                    self.popup = "Khong du tien."
+                    self.popup = "Không đủ tiền."
                     self.popup_timer = pygame.time.get_ticks() + 1200
                     return
                 self.money -= 1
@@ -2939,7 +3077,7 @@ class Game:
                         candidates = WEAPON_DROP_POOL
                     data = dict(random.choice(candidates))
                     self.unlock_weapon(data, equip_now=True)
-                self.popup = f"Da mua: {title}"
+                self.popup = f"Đã mua: {title}"
                 self.popup_timer = pygame.time.get_ticks() + 1400
                 play_sound_effect("sfx_item_drop")
                 return
@@ -2972,6 +3110,10 @@ class Game:
                 if event.key == pygame.K_RETURN:
                     self.trailer_started_at = pygame.time.get_ticks()
                     self.state = "intro"
+                elif event.key in (pygame.K_LEFT, pygame.K_UP):
+                    self.set_map_background_by_index(self.selected_map_index - 1)
+                elif event.key in (pygame.K_RIGHT, pygame.K_DOWN):
+                    self.set_map_background_by_index(self.selected_map_index + 1)
                 elif event.key == pygame.K_h:
                     self.show_help = not self.show_help
             return
