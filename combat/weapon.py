@@ -104,16 +104,22 @@ class Bullet:
         
     def draw(self, surface, camera=None):
         draw_pos = (int(self.x), int(self.y))
+        zoom = 1.0
         if camera:
             draw_pos = camera.world_to_screen(self.x, self.y)
+            zoom = camera.zoom
             
         if self.exploded and self.radius > 0:
-            pygame.draw.circle(surface, (255, 160, 70), draw_pos, self.radius, 3)
-            pygame.draw.circle(surface, (255, 220, 120), draw_pos, max(6, self.radius // 2))
+            pygame.draw.circle(surface, (255, 160, 70), draw_pos, int(self.radius * zoom), 3)
+            pygame.draw.circle(surface, (255, 220, 120), draw_pos, max(6, int(self.radius * zoom // 2)))
             return
         
-        rect = self.image.get_rect(center=draw_pos)
-        surface.blit(self.image, rect.topleft)
+        img = self.image
+        if zoom != 1.0:
+            img = pygame.transform.scale(img, (int(img.get_width() * zoom), int(img.get_height() * zoom)))
+        
+        rect = img.get_rect(center=draw_pos)
+        surface.blit(img, rect.topleft)
 
 class Weapon:
     def __init__(
@@ -355,11 +361,17 @@ class Weapon:
     def draw(self, surface, camera=None):
         # Draw weapon
         draw_pos = (self.x, self.y)
+        zoom = 1.0
         if camera:
             draw_pos = camera.world_to_screen(self.x, self.y)
+            zoom = camera.zoom
             
-        weapon_rect = self.rotated_image.get_rect(center=draw_pos)
-        surface.blit(self.rotated_image, weapon_rect)
+        img = self.rotated_image
+        if zoom != 1.0:
+            img = pygame.transform.scale(img, (int(img.get_width() * zoom), int(img.get_height() * zoom)))
+            
+        weapon_rect = img.get_rect(center=draw_pos)
+        surface.blit(img, weapon_rect)
         
         # Draw bullets
         for bullet in self.bullets:

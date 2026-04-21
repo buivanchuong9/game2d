@@ -671,10 +671,36 @@ class Game:
             self.map_world_surface = pygame.transform.smoothscale(cropped, (GRID_SIZE * TILE_SIZE, GRID_SIZE * TILE_SIZE))
             self.map_background_surface = pygame.transform.smoothscale(cropped, (MAP_WIDTH, MAP_HEIGHT))
             self.map_surface_cache[selected] = (self.map_world_surface, self.map_background_surface)
+            self.generate_walls_from_image()
         except Exception as exc:
             print(f"[MAP LOAD ERROR] {selected}: {exc}")
             self.map_background_surface = None
             self.map_world_surface = None
+
+    def generate_walls_from_image(self):
+        """Sample the map image to detect walls (dark areas)."""
+        if not self.map_world_surface:
+            return
+        
+        # New set of blocked tiles based on image brightness
+        new_blocked = set()
+        w, h = self.map_world_surface.get_size()
+        
+        # Sample at tile centers
+        for ty in range(GRID_SIZE):
+            for tx in range(GRID_SIZE):
+                px = tx * TILE_SIZE + TILE_SIZE // 2
+                py = ty * TILE_SIZE + TILE_SIZE // 2
+                if px < w and py < h:
+                    color = self.map_world_surface.get_at((px, py))
+                    # Heuristic: If it's very dark, it's likely a wall/obstacle
+                    if color.r < 50 and color.g < 50 and color.b < 50:
+                        new_blocked.add((tx, ty))
+        
+        self.current_blocked = new_blocked
+        # Update enemy pathfinding grids
+        for entry in self.story_enemies:
+            entry.enemy.obstacle_map = self.build_obstacle_grid()
 
     def build_chapters(self):
         def ring_walls():
@@ -1184,6 +1210,11 @@ class Game:
 
     def set_chapter(self, index):
         self.chapter_index = index
+        # Load corresponding map background
+        if hasattr(self, 'map_assets') and len(self.map_assets) > index + 1:
+            self.set_map_background_by_index(index + 1)
+        else:
+            self.set_map_background_by_index(0)
         self.chapter = self.chapters[index]
         self.mission = MissionTracker(self.chapter)
         self.story_enemies = []
@@ -1665,23 +1696,12 @@ class Game:
 
             keys = pygame.key.get_pressed()
             self.player.update(keys, self.current_blocked, None, None, TILE_SIZE)
+            # Restore strict boundaries
             self.player.x = max(TILE_SIZE, min(self.player.x, self.world_w - TILE_SIZE))
             self.player.y = max(TILE_SIZE, min(self.player.y, self.world_h - TILE_SIZE))
-
-            # Auto-pickup money on contact
-            ptx, pty = self.current_tile()
-            for it in self.chapter.items:
-                if it.collected:
-                    continue
-                if it.item_type != "money":
-                    continue
-                # within 1 tile radius, so "chạy vào là nhặt"
-                if abs(it.grid_pos[0] - ptx) <= 1 and abs(it.grid_pos[1] - pty) <= 1:
-                    it.collected = True
-                    self.money += int(getattr(it, "amount", 1) or 1)
-                    play_sound_effect("sfx_item_drop")
             
-            self.camera.update(self.player.x, self.player.y, self.world_w, self.world_h)
+            # Update camera to follow player and CLAMP to world edges (keeps map on screen)
+            self.camera.update(self.player.x, self.player.y, world_w=self.world_w, world_h=self.world_h)
             
             self.update_enemies()
             self.spawn_dynamic_enemies()
@@ -2304,23 +2324,35 @@ class Game:
         else:
             base_1, base_2, wall_tile = current_tiles["floor1"], current_tiles["floor2"], current_tiles["wall"]
 
-        for ty in range(min_ty, max_ty + 1):
-            for tx in range(min_tx, max_tx + 1):
+        for ty in range(max(0, min_ty), min(GRID_SIZE, max_ty + 1)):
+            for tx in range(max(0, min_tx), min(GRID_SIZE, max_tx + 1)):
                 sx, sy = self.camera.world_to_screen(tx * TILE_SIZE, ty * TILE_SIZE)
                 if custom_map_active:
                     src_rect = pygame.Rect(tx * TILE_SIZE, ty * TILE_SIZE, TILE_SIZE, TILE_SIZE)
-                    surface.blit(self.map_world_surface, (sx, sy), src_rect)
+                    # Scale the tile to match camera zoom
+                    tile_surf = self.map_world_surface.subsurface(src_rect)
+                    if self.camera.zoom != 1.0:
+                        scaled_size = (int(TILE_SIZE * self.camera.zoom), int(TILE_SIZE * self.camera.zoom))
+                        tile_surf = pygame.transform.scale(tile_surf, scaled_size)
+                    surface.blit(tile_surf, (sx, sy))
                 else:
                     base_tile = base_2 if (tx * 3 + ty * 5) % 11 == 0 else base_1
+                    if self.camera.zoom != 1.0:
+                        scaled_size = (int(TILE_SIZE * self.camera.zoom), int(TILE_SIZE * self.camera.zoom))
+                        base_tile = pygame.transform.scale(base_tile, scaled_size)
                     surface.blit(base_tile, (sx, sy))
 
                 if (tx, ty) in self.current_blocked:
-                    # Draw solid wall tile first (clean readable walls)
-                    surface.blit(wall_tile, (sx, sy))
-                    # Optional sparse contextual props on some blocked tiles (reduce clutter)
+                    # Draw solid wall tile first
+                    w_tile = wall_tile
+                    if self.camera.zoom != 1.0:
+                        scaled_size = (int(TILE_SIZE * self.camera.zoom), int(TILE_SIZE * self.camera.zoom))
+                        w_tile = pygame.transform.scale(wall_tile, scaled_size)
+                    surface.blit(w_tile, (sx, sy))
+                    # Optional sparse contextual props
                     prop_key = obstacle_prop_for_tile(self.chapter.id, tx, ty)
                     if prop_key and ((tx * 5 + ty * 7) % 11 == 0):
-                        draw_prop(surface, prop_key, sx, sy)
+                        draw_prop(surface, prop_key, sx, sy, scale=self.camera.zoom)
                 else:
                     # Outdoor-only ambient decals (avoid weird grass inside buildings)
                     if self.chapter.id in {"roof", "ground", "escape"}:
@@ -2343,14 +2375,14 @@ class Game:
                     elif prop == "grass":
                         surface.blit(DESERT_BIG_GRASS, (sx, sy))
                     else:
-                        draw_prop(surface, prop, sx, sy)
+                        draw_prop(surface, prop, sx, sy, scale=self.camera.zoom)
                     
         # Gate at chapter exit (shows locked/unlocked state)
         if self.chapter.exit_pos:
             ex, ey = self.chapter.exit_pos
             if self.camera.is_visible(ex * TILE_SIZE, ey * TILE_SIZE):
                 gsx, gsy = self.camera.world_to_screen(ex * TILE_SIZE, ey * TILE_SIZE)
-                draw_prop(surface, "gate_open" if self.exit_unlocked else "gate_closed", gsx, gsy)
+                draw_prop(surface, "gate_open" if self.exit_unlocked else "gate_closed", gsx, gsy, scale=self.camera.zoom)
 
         for item in self.chapter.items:
             if item.collected: continue
@@ -2367,14 +2399,19 @@ class Game:
                     label = self.font_small.render(item.name, True, label_col)
                     surface.blit(label, (sx - 4, sy - 14))
                 if item.sprite_surface:
-                    surface.blit(item.sprite_surface, (sx, sy))
+                    s = item.sprite_surface
+                    if self.camera.zoom != 1.0:
+                        s = pygame.transform.scale(s, (int(s.get_width() * self.camera.zoom), int(s.get_height() * self.camera.zoom)))
+                    surface.blit(s, (sx, sy))
                 else:
                     # Fallback if no sprite
                     sprite = ITEM_SURFACES.get(item.item_type)
                     if sprite:
+                        if self.camera.zoom != 1.0:
+                            sprite = pygame.transform.scale(sprite, (int(sprite.get_width() * self.camera.zoom), int(sprite.get_height() * self.camera.zoom)))
                         surface.blit(sprite, (sx, sy))
                     else:
-                        pygame.draw.circle(surface, item.color, (sx+8, sy+8), 6)
+                        pygame.draw.circle(surface, item.color, (sx+8*self.camera.zoom, sy+8*self.camera.zoom), 6 * self.camera.zoom)
                     
         for npc in self.chapter.npcs:
             if self.camera.is_visible(npc.grid_pos[0]*TILE_SIZE, npc.grid_pos[1]*TILE_SIZE):
@@ -2384,32 +2421,33 @@ class Game:
                 # Use sprite if available
                 if npc.sprite_path and npc.sprite_path in ALL_GRAPHICS_SURFACES:
                     sprite = ALL_GRAPHICS_SURFACES[npc.sprite_path]
-                    surface.blit(sprite, sprite.get_rect(center=(sx, sy)))
-                elif npc.sprite_path and os.path.exists(npc.sprite_path):
-                    # Load dynamically if not in ALL_GRAPHICS
-                    sprite = pygame.image.load(npc.sprite_path).convert_alpha()
-                    ALL_GRAPHICS_SURFACES[npc.sprite_path] = sprite
+                    if self.camera.zoom != 1.0:
+                        sprite = pygame.transform.scale(sprite, (int(sprite.get_width() * self.camera.zoom), int(sprite.get_height() * self.camera.zoom)))
                     surface.blit(sprite, sprite.get_rect(center=(sx, sy)))
                 else:
-                    pygame.draw.circle(surface, color, (sx, sy), 7)
-                    pygame.draw.circle(surface, WHITE, (sx, sy), 7, 1)
+                    pygame.draw.circle(surface, color, (sx, sy), 7 * self.camera.zoom)
+                    pygame.draw.circle(surface, WHITE, (sx, sy), 7 * self.camera.zoom, 1)
 
         for entry in self.story_enemies:
             if self.camera.is_visible(entry.enemy.x, entry.enemy.y):
                 sx, sy = self.camera.world_to_screen(entry.enemy.x, entry.enemy.y)
-                self.draw_shadow(surface, sx, sy + 20)
+                self.draw_shadow(surface, sx, sy + 20 * self.camera.zoom, width=44 * self.camera.zoom, height=18 * self.camera.zoom)
                 sprite = entry.enemy.frames[entry.enemy.current_action][entry.enemy.current_frame]
                 if not entry.enemy.look_right:
                     sprite = pygame.transform.flip(sprite, True, False)
+                if self.camera.zoom != 1.0:
+                    sprite = pygame.transform.scale(sprite, (int(sprite.get_width() * self.camera.zoom), int(sprite.get_height() * self.camera.zoom)))
                 rect = sprite.get_rect(center=(sx, sy))
                 surface.blit(sprite, rect.topleft)
 
         self.draw_pet_companion(surface)
         psx, psy = self.camera.world_to_screen(self.player.x, self.player.y)
-        self.draw_shadow(surface, psx, psy + 24, width=48)
+        self.draw_shadow(surface, psx, psy + 24 * self.camera.zoom, width=48 * self.camera.zoom, height=20 * self.camera.zoom)
         self.weapon_manager.draw(surface, self.camera)
         
         sprite = self.player.frames[self.player.direction][self.player.current_frame]
+        if self.camera.zoom != 1.0:
+            sprite = pygame.transform.scale(sprite, (int(sprite.get_width() * self.camera.zoom), int(sprite.get_height() * self.camera.zoom)))
         rect = sprite.get_rect(center=(psx, psy))
         surface.blit(sprite, rect.topleft)
 
