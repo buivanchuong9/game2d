@@ -7,9 +7,32 @@ import os
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 def load_ui_font(size, bold=False):
-	path = pygame.font.match_font("Arial", bold=bold)
-	if path:
-		return pygame.font.Font(path, size)
+	# Prefer fonts with broad Unicode coverage so Vietnamese accents render correctly.
+	path_candidates = [
+		"/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+		"/System/Library/Fonts/Supplemental/Arial.ttf",
+		"/System/Library/Fonts/Supplemental/Verdana.ttf",
+		"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+		"/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+		"C:/Windows/Fonts/arial.ttf",
+		"C:/Windows/Fonts/tahoma.ttf",
+	]
+	for path in path_candidates:
+		if os.path.exists(path):
+			try:
+				return pygame.font.Font(path, size)
+			except Exception:
+				pass
+
+	name_candidates = ["arial unicode ms", "arial", "verdana", "tahoma", "dejavu sans", "noto sans"]
+	for name in name_candidates:
+		path = pygame.font.match_font(name, bold=bold)
+		if path:
+			try:
+				return pygame.font.Font(path, size)
+			except Exception:
+				pass
+
 	return pygame.font.Font(None, size)
 
 def wrap_text(text, font, max_width):
