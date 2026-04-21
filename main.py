@@ -1324,8 +1324,6 @@ class Game:
     def item_at_player(self):
         for item in self.chapter.items:
             # Money is auto-picked up; never require E
-            if item.item_type == "money":
-                continue
             if not item.collected:
                 ix = item.grid_pos[0] * TILE_SIZE + TILE_SIZE // 2
                 iy = item.grid_pos[1] * TILE_SIZE + TILE_SIZE // 2
@@ -1458,6 +1456,7 @@ class Game:
 
     def collect_item(self, item):
         item.collected = True
+        play_sound_effect("sfx_item_drop")
         self.popup = item.description
         self.popup_timer = pygame.time.get_ticks() + 2600
         if item.item_type == "weapon":
@@ -1674,17 +1673,17 @@ class Game:
             self.player.y = max(TILE_SIZE, min(self.player.y, self.world_h - TILE_SIZE))
 
             # Auto-pickup money on contact
-            ptx, pty = self.current_tile()
             for it in self.chapter.items:
                 if it.collected:
                     continue
                 if it.item_type != "money":
                     continue
-                # within 1 tile radius, so "chạy vào là nhặt"
-                if abs(it.grid_pos[0] - ptx) <= 1 and abs(it.grid_pos[1] - pty) <= 1:
-                    it.collected = True
-                    self.money += int(getattr(it, "amount", 1) or 1)
-                    play_sound_effect("sfx_item_drop")
+                # Auto-pickup radius (pixel based for smoother feel)
+                ix = it.grid_pos[0] * TILE_SIZE + TILE_SIZE // 2
+                iy = it.grid_pos[1] * TILE_SIZE + TILE_SIZE // 2
+                dist = math.hypot(ix - self.player.x, iy - self.player.y)
+                if dist <= INTERACT_RADIUS * 0.7:
+                    self.collect_item(it)
             
             self.camera.update(self.player.x, self.player.y, self.world_w, self.world_h)
             
@@ -1796,8 +1795,8 @@ class Game:
 
             enemy.obstacle_map = self.build_obstacle_grid()
             enemy.update(self.player)
-            enemy.x = max(TILE_SIZE, min(enemy.x, MAP_WIDTH - TILE_SIZE))
-            enemy.y = max(TILE_SIZE, min(enemy.y, MAP_HEIGHT - TILE_SIZE))
+            enemy.x = max(TILE_SIZE, min(enemy.x, self.world_w - TILE_SIZE))
+            enemy.y = max(TILE_SIZE, min(enemy.y, self.world_h - TILE_SIZE))
             if enemy.is_dead and not entry.dead_registered:
                 entry.dead_registered = True
                 play_sound_effect("sfx_enemy_death")
@@ -2985,6 +2984,7 @@ class Game:
         y = info_rect.y + 40
         lines = [
             f"Kills: {self.kill_count}", f"Saved: {self.saved_npcs}",
+            f"Money: {self.money}",
             "B: Open Shop", "TAB: Path Mode", "M: Full Map"
         ]
         for line in lines:
