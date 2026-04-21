@@ -1350,8 +1350,6 @@ class Game:
     def item_at_player(self):
         for item in self.chapter.items:
             # Money is auto-picked up; never require E
-            if item.item_type == "money":
-                continue
             if not item.collected:
                 ix = item.grid_pos[0] * TILE_SIZE + TILE_SIZE // 2
                 iy = item.grid_pos[1] * TILE_SIZE + TILE_SIZE // 2
@@ -1484,6 +1482,7 @@ class Game:
 
     def collect_item(self, item):
         item.collected = True
+        play_sound_effect("sfx_item_drop")
         self.popup = item.description
         self.popup_timer = pygame.time.get_ticks() + 2600
         if item.item_type == "weapon":
@@ -1700,6 +1699,22 @@ class Game:
             self.player.x = max(TILE_SIZE, min(self.player.x, self.world_w - TILE_SIZE))
             self.player.y = max(TILE_SIZE, min(self.player.y, self.world_h - TILE_SIZE))
             
+            # Auto-pickup money on contact
+            player_rect = self.player.get_rect()
+            # Expand player pickup rect slightly for better "vàng" collection
+            pickup_rect = player_rect.inflate(20, 20)
+            for it in self.chapter.items:
+                if it.collected or it.item_type != "money":
+                    continue
+                
+                # Create a rect for the item
+                ix = it.grid_pos[0] * TILE_SIZE
+                iy = it.grid_pos[1] * TILE_SIZE
+                item_rect = pygame.Rect(ix, iy, TILE_SIZE, TILE_SIZE)
+                
+                if pickup_rect.colliderect(item_rect):
+                    self.collect_item(it)
+            
             # Update camera to follow player and CLAMP to world edges (keeps map on screen)
             self.camera.update(self.player.x, self.player.y, world_w=self.world_w, world_h=self.world_h)
             
@@ -1823,7 +1838,7 @@ class Game:
                     self.mission.data["stage"] = max(int(self.mission.data.get("stage", 0) or 0), 2)
                 # Each kill drops 1 money
                 etile = entry.tile()
-                self.spawn_mission_item_at(etile, "money", "Tien", "1 tien roi tu zombie.", color=YELLOW)
+                self.spawn_mission_item_near(etile, "money", "Tien", "1 tien roi tu zombie.", color=YELLOW, radius=2)
                 if entry.archetype in {"special", "tank"}:
                     self.mission.data["special_kills"] += 1
                 if entry.archetype == "boss":
@@ -3018,6 +3033,7 @@ class Game:
         y = info_rect.y + 40
         lines = [
             f"Kills: {self.kill_count}", f"Saved: {self.saved_npcs}",
+            f"Money: {self.money}",
             "B: Open Shop", "TAB: Path Mode", "M: Full Map"
         ]
         for line in lines:
@@ -3143,6 +3159,28 @@ class Game:
             pygame.quit()
             sys.exit()
         
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_ESCAPE:
+                if self.state == "playing":
+                    if self.show_shop:
+                        self.show_shop = False
+                        return
+                    if self.show_map:
+                        self.show_map = False
+                        return
+                    if self.dialog_npc:
+                        # Optionally skip dialog or just pause? 
+                        # Genshin pauses even with dialog. Let's just pause.
+                        pass
+                    self.state = "pause"
+                    return
+                elif self.state == "pause":
+                    self.state = "playing"
+                    return
+                elif self.state == "menu":
+                    pygame.quit()
+                    sys.exit()
+
         if self.state == "menu":
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_RETURN:
@@ -3196,11 +3234,10 @@ class Game:
 
                 if event.key == pygame.K_b:
                     self.show_shop = not self.show_shop
+                    return
                 if self.show_shop: return
 
-                if event.key == pygame.K_ESCAPE:
-                    self.state = "pause"
-                elif event.key == pygame.K_m:
+                if event.key == pygame.K_m:
                     self.show_map = not self.show_map
                 elif event.key == pygame.K_TAB:
                     self.hint_mode_index = (self.hint_mode_index + 1) % len(self.hint_modes)
@@ -3225,9 +3262,7 @@ class Game:
                     self.skill_manager.use_skill(2, self.player.x, self.player.y, wmx, wmy)
 
         if self.state == "pause" and event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_ESCAPE:
-                self.state = "playing"
-            elif event.key == pygame.K_RETURN:
+            if event.key == pygame.K_RETURN:
                 self.state = "playing"
             elif event.key == pygame.K_m:
                 self.state = "menu"
