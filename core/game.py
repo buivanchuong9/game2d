@@ -44,8 +44,11 @@ SCREEN_WIDTH = 1200
 SCREEN_HEIGHT = 800
 MAP_WIDTH = SCREEN_WIDTH - SIDEBAR_WIDTH
 MAP_HEIGHT = SCREEN_HEIGHT
-# Fullscreen + scaled rendering (keeps internal resolution stable)
-screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SCALED | pygame.FULLSCREEN)
+# Fullscreen by default; test harness can force windowed mode via env.
+display_flags = pygame.SCALED
+if _os.environ.get("LASTROOF_WINDOWED", "0") != "1":
+    display_flags |= pygame.FULLSCREEN
+screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), display_flags)
 pygame.display.set_caption("Last Roof: Escape City")
 clock = pygame.time.Clock()
 
@@ -1347,15 +1350,22 @@ class Game:
     def current_tile(self):
         return (int(self.player.x // TILE_SIZE), int(self.player.y // TILE_SIZE))
 
+    def item_pickup_rect(self, item, inflate=8):
+        rect = pygame.Rect(item.grid_pos[0] * TILE_SIZE, item.grid_pos[1] * TILE_SIZE, TILE_SIZE, TILE_SIZE)
+        if inflate:
+            rect = rect.inflate(inflate, inflate)
+        return rect
+
+    def player_can_pick_item(self, item, inflate=8):
+        return self.player.get_rect().colliderect(self.item_pickup_rect(item, inflate=inflate))
+
     def item_at_player(self):
         for item in self.chapter.items:
             # Money is auto-picked up; never require E
             if item.item_type == "money":
                 continue
             if not item.collected:
-                ix = item.grid_pos[0] * TILE_SIZE + TILE_SIZE // 2
-                iy = item.grid_pos[1] * TILE_SIZE + TILE_SIZE // 2
-                if math.hypot(ix - self.player.x, iy - self.player.y) <= INTERACT_RADIUS:
+                if self.player_can_pick_item(item, inflate=INTERACT_RADIUS):
                     return item
         return None
 
@@ -1455,7 +1465,7 @@ class Game:
             )
         )
 
-    def spawn_mission_item_at(self, tile: tuple[int, int], item_type: str, name: str, description: str, color=YELLOW):
+    def spawn_mission_item_at(self, tile: tuple[int, int], item_type: str, name: str, description: str, color=YELLOW, amount=0):
         """Spawn a mission item on a walkable tile if free."""
         tx, ty = tile
         if not (1 <= tx < GRID_SIZE - 1 and 1 <= ty < GRID_SIZE - 1):
@@ -1465,7 +1475,7 @@ class Game:
         for it in self.chapter.items:
             if not it.collected and it.grid_pos == (tx, ty):
                 return False
-        self.chapter.items.append(ItemPickup((tx, ty), name, description, item_type, color=color))
+        self.chapter.items.append(ItemPickup((tx, ty), name, description, item_type, amount=amount, color=color))
         play_sound_effect("sfx_item_drop")
         return True
 
@@ -1479,6 +1489,25 @@ class Game:
                     if abs(dx) + abs(dy) != r:
                         continue
                     if self.spawn_mission_item_at((tx + dx, ty + dy), item_type, name, description, color=color):
+                        return True
+        return False
+
+    def spawn_money_drop_near(self, tile: tuple[int, int], amount: int = 1, radius: int = 2):
+        """Spawn money near the drop tile and keep it reachable even around walls/corpses."""
+        tx, ty = tile
+        for r in range(0, max(0, radius) + 1):
+            for dx in range(-r, r + 1):
+                for dy in range(-r, r + 1):
+                    if abs(dx) + abs(dy) != r:
+                        continue
+                    if self.spawn_mission_item_at(
+                        (tx + dx, ty + dy),
+                        "money",
+                        "Tien",
+                        "1 tien roi tu zombie.",
+                        color=YELLOW,
+                        amount=max(1, int(amount or 1)),
+                    ):
                         return True
         return False
 
@@ -1699,6 +1728,14 @@ class Game:
             # Restore strict boundaries
             self.player.x = max(TILE_SIZE, min(self.player.x, self.world_w - TILE_SIZE))
             self.player.y = max(TILE_SIZE, min(self.player.y, self.world_h - TILE_SIZE))
+
+            # Runtime trace found the actual game loop never auto-picked money in core/game.py.
+            for item in list(self.chapter.items):
+                if item.collected or item.item_type != "money":
+                    continue
+                if self.player_can_pick_item(item, inflate=12):
+                    self.collect_item(item)
+                    play_sound_effect("sfx_item_drop")
             
             # Update camera to follow player and CLAMP to world edges (keeps map on screen)
             self.camera.update(self.player.x, self.player.y, world_w=self.world_w, world_h=self.world_h)
@@ -1821,9 +1858,9 @@ class Game:
                 # Stage progression hooks (linear missions)
                 if self.chapter.id == "roof" and self.mission.data.get("weapon_collected") and self.mission.data["zombies_killed"] >= 1:
                     self.mission.data["stage"] = max(int(self.mission.data.get("stage", 0) or 0), 2)
-                # Each kill drops 1 money
+                # Each kill drops 1 money; shift to a nearby free tile if the death tile is blocked.
                 etile = entry.tile()
-                self.spawn_mission_item_at(etile, "money", "Tien", "1 tien roi tu zombie.", color=YELLOW)
+                self.spawn_money_drop_near(etile, amount=1, radius=2)
                 if entry.archetype in {"special", "tank"}:
                     self.mission.data["special_kills"] += 1
                 if entry.archetype == "boss":

@@ -304,6 +304,20 @@ class Weapon:
         return False
     
     def update_bullets(self, enemies, blocked_tiles=None):
+        def enemy_hitbox_rect(enemy):
+            """Build a collision rect from the active sprite frame for fair boss hitboxes."""
+            try:
+                frame = enemy.frames[enemy.current_action][enemy.current_frame]
+                fw, fh = frame.get_size()
+                # Keep hitbox tighter than the sprite to avoid hitting empty transparent margins.
+                hit_w = max(28, int(fw * 0.45))
+                hit_h = max(28, int(fh * 0.45))
+            except Exception:
+                hit_w = hit_h = 60
+            rect = pygame.Rect(0, 0, hit_w, hit_h)
+            rect.center = (int(enemy.x), int(enemy.y))
+            return rect
+
         bullets_to_remove = []
         for bullet in self.bullets:
             bullet.update()
@@ -321,7 +335,7 @@ class Weapon:
             # Check collision with enemies
             for enemy in enemies:
                 if not enemy.is_dead:
-                    enemy_rect = pygame.Rect(enemy.x - 30, enemy.y - 30, 60, 60)
+                    enemy_rect = enemy_hitbox_rect(enemy)
                     
                     if bullet.melee:
                         # Melee has larger hit area

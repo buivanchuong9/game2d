@@ -530,9 +530,11 @@ class Game:
         self.show_help = False
         self.show_shop = False
         self.show_map = False
+        # Temporary testing mode: force map background to black for readability/debugging.
+        self.force_black_map_background = True
         self.map_assets = [None] + self.discover_map_backgrounds()
         self.selected_map_index = 0
-        self.selected_map_name = "Default Tilemap"
+        self.selected_map_name = "Black Background" if self.force_black_map_background else "Default Tilemap"
         self.map_background_path = None
         self.map_background_surface = None
         self.map_world_surface = None
@@ -647,6 +649,14 @@ class Game:
         return image.subsurface(pygame.Rect(x1, y1, x2 - x1, y2 - y1)).copy()
 
     def set_map_background_by_index(self, index):
+        if getattr(self, "force_black_map_background", False):
+            self.selected_map_index = 0
+            self.selected_map_name = "Black Background"
+            self.map_background_path = None
+            self.map_background_surface = None
+            self.map_world_surface = None
+            return
+
         if not self.map_assets:
             self.selected_map_index = 0
             self.selected_map_name = "Default Tilemap"
@@ -1321,15 +1331,22 @@ class Game:
     def current_tile(self):
         return (int(self.player.x // TILE_SIZE), int(self.player.y // TILE_SIZE))
 
+    def item_pickup_rect(self, item, inflate=8):
+        rect = pygame.Rect(item.grid_pos[0] * TILE_SIZE, item.grid_pos[1] * TILE_SIZE, TILE_SIZE, TILE_SIZE)
+        if inflate:
+            rect = rect.inflate(inflate, inflate)
+        return rect
+
+    def player_can_pick_item(self, item, inflate=8):
+        return self.player.get_rect().colliderect(self.item_pickup_rect(item, inflate=inflate))
+
     def item_at_player(self):
         for item in self.chapter.items:
             # Money is auto-picked up; never require E
             if item.item_type == "money":
                 continue
             if not item.collected:
-                ix = item.grid_pos[0] * TILE_SIZE + TILE_SIZE // 2
-                iy = item.grid_pos[1] * TILE_SIZE + TILE_SIZE // 2
-                if math.hypot(ix - self.player.x, iy - self.player.y) <= INTERACT_RADIUS:
+                if self.player_can_pick_item(item, inflate=INTERACT_RADIUS):
                     return item
         return None
 
@@ -1429,7 +1446,7 @@ class Game:
             )
         )
 
-    def spawn_mission_item_at(self, tile: tuple[int, int], item_type: str, name: str, description: str, color=YELLOW):
+    def spawn_mission_item_at(self, tile: tuple[int, int], item_type: str, name: str, description: str, color=YELLOW, amount=0):
         """Spawn a mission item on a walkable tile if free."""
         tx, ty = tile
         if not (1 <= tx < GRID_SIZE - 1 and 1 <= ty < GRID_SIZE - 1):
@@ -1439,7 +1456,7 @@ class Game:
         for it in self.chapter.items:
             if not it.collected and it.grid_pos == (tx, ty):
                 return False
-        self.chapter.items.append(ItemPickup((tx, ty), name, description, item_type, color=color))
+        self.chapter.items.append(ItemPickup((tx, ty), name, description, item_type, amount=amount, color=color))
         play_sound_effect("sfx_item_drop")
         return True
 
@@ -1453,6 +1470,25 @@ class Game:
                     if abs(dx) + abs(dy) != r:
                         continue
                     if self.spawn_mission_item_at((tx + dx, ty + dy), item_type, name, description, color=color):
+                        return True
+        return False
+
+    def spawn_money_drop_near(self, tile: tuple[int, int], amount: int = 1, radius: int = 2):
+        """Spawn money near a tile; avoids blocked tiles so dropped coins are always reachable."""
+        tx, ty = tile
+        for r in range(0, max(0, radius) + 1):
+            for dx in range(-r, r + 1):
+                for dy in range(-r, r + 1):
+                    if abs(dx) + abs(dy) != r:
+                        continue
+                    if self.spawn_mission_item_at(
+                        (tx + dx, ty + dy),
+                        "money",
+                        "Tien",
+                        "1 tien roi tu zombie.",
+                        color=YELLOW,
+                        amount=max(1, int(amount or 1)),
+                    ):
                         return True
         return False
 
@@ -1674,16 +1710,14 @@ class Game:
             self.player.y = max(TILE_SIZE, min(self.player.y, self.world_h - TILE_SIZE))
 
             # Auto-pickup money on contact
-            ptx, pty = self.current_tile()
             for it in self.chapter.items:
                 if it.collected:
                     continue
                 if it.item_type != "money":
                     continue
-                # within 1 tile radius, so "chạy vào là nhặt"
-                if abs(it.grid_pos[0] - ptx) <= 1 and abs(it.grid_pos[1] - pty) <= 1:
-                    it.collected = True
-                    self.money += int(getattr(it, "amount", 1) or 1)
+                # Use hitbox overlap instead of center-distance so walking across the coin always picks it up.
+                if self.player_can_pick_item(it, inflate=12):
+                    self.collect_item(it)
                     play_sound_effect("sfx_item_drop")
             
             self.camera.update(self.player.x, self.player.y, self.world_w, self.world_h)
@@ -1806,9 +1840,9 @@ class Game:
                 # Stage progression hooks (linear missions)
                 if self.chapter.id == "roof" and self.mission.data.get("weapon_collected") and self.mission.data["zombies_killed"] >= 1:
                     self.mission.data["stage"] = max(int(self.mission.data.get("stage", 0) or 0), 2)
-                # Each kill drops 1 money
+                # Each kill drops 1 money (fallback to nearby free tile if death tile is blocked)
                 etile = entry.tile()
-                self.spawn_mission_item_at(etile, "money", "Tien", "1 tien roi tu zombie.", color=YELLOW)
+                self.spawn_money_drop_near(etile, amount=1, radius=2)
                 if entry.archetype in {"special", "tank"}:
                     self.mission.data["special_kills"] += 1
                 if entry.archetype == "boss":
@@ -2312,7 +2346,9 @@ class Game:
         for ty in range(min_ty, max_ty + 1):
             for tx in range(min_tx, max_tx + 1):
                 sx, sy = self.camera.world_to_screen(tx * TILE_SIZE, ty * TILE_SIZE)
-                if custom_map_active:
+                if self.force_black_map_background:
+                    pygame.draw.rect(surface, BLACK, (sx, sy, TILE_SIZE, TILE_SIZE))
+                elif custom_map_active:
                     src_rect = pygame.Rect(tx * TILE_SIZE, ty * TILE_SIZE, TILE_SIZE, TILE_SIZE)
                     surface.blit(self.map_world_surface, (sx, sy), src_rect)
                 else:
@@ -2457,6 +2493,9 @@ class Game:
             pygame.draw.circle(screen, (200, 220, 255, 100), (int(px), int(py)), 3)
 
     def draw_chapter_backdrop(self, surface):
+        if self.force_black_map_background:
+            pygame.draw.rect(surface, BLACK, (0, 0, MAP_WIDTH, MAP_HEIGHT))
+            return
         top = self.chapter.chapter_color
         for y in range(0, SCREEN_HEIGHT, 8):
             blend = y / SCREEN_HEIGHT
