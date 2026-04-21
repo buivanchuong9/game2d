@@ -16,6 +16,7 @@ class Camera:
         self.x = 0.0   # Top-left of camera in world coords
         self.y = 0.0
         self.smoothing = 0.12   # Lower = smoother (lerp factor)
+        self.zoom = 2.0         # Default zoom level (2x as requested "phóng to")
 
         # Shake
         self._shake_timer = 0
@@ -23,18 +24,24 @@ class Camera:
         self._shake_ox = 0
         self._shake_oy = 0
 
-    def update(self, player_wx, player_wy, world_w=2000, world_h=2000):
-        """Smooth-follow player and clamp to world boundaries."""
-        target_x = player_wx - self.view_w / 2
-        target_y = player_wy - self.view_h / 2
+    def update(self, player_wx, player_wy, world_w=None, world_h=None):
+        """Smooth-follow player. Clamp only if world dimensions are provided."""
+        # Calculate target top-left to center player
+        # With zoom, the effective view size in world coordinates is smaller
+        world_view_w = self.view_w / self.zoom
+        world_view_h = self.view_h / self.zoom
+        
+        target_x = player_wx - world_view_w / 2
+        target_y = player_wy - world_view_h / 2
         
         # Smooth follow
         self.x += (target_x - self.x) * self.smoothing
         self.y += (target_y - self.y) * self.smoothing
         
-        # Clamp camera to world edges
-        self.x = max(0, min(self.x, world_w - self.view_w))
-        self.y = max(0, min(self.y, world_h - self.view_h))
+        # Clamp camera to world edges ONLY if world bounds are given
+        if world_w is not None and world_h is not None:
+            self.x = max(0, min(self.x, world_w - world_view_w))
+            self.y = max(0, min(self.y, world_h - world_view_h))
 
         if self._shake_timer > 0:
             self._shake_timer -= 1
@@ -51,15 +58,15 @@ class Camera:
         self._shake_timer = max(self._shake_timer, duration)
 
     def world_to_screen(self, wx, wy):
-        """Convert world pixel coords to screen pixel coords."""
-        sx = wx - self.x + self._shake_ox
-        sy = wy - self.y + self._shake_oy
+        """Convert world pixel coords to screen pixel coords with zoom."""
+        sx = (wx - self.x) * self.zoom + self._shake_ox
+        sy = (wy - self.y) * self.zoom + self._shake_oy
         return int(sx), int(sy)
 
     def screen_to_world(self, sx, sy):
-        """Convert screen pixel coords to world pixel coords."""
-        wx = sx + self.x - self._shake_ox
-        wy = sy + self.y - self._shake_oy
+        """Convert screen pixel coords to world pixel coords with zoom."""
+        wx = (sx - self._shake_ox) / self.zoom + self.x
+        wy = (sy - self._shake_oy) / self.zoom + self.y
         return wx, wy
 
     def is_visible(self, wx, wy, margin=128):
@@ -72,8 +79,10 @@ class Camera:
 
     def get_visible_tile_range(self, tile_size):
         """Return (min_tx, max_tx, min_ty, max_ty) of visible tile grid."""
+        world_view_w = self.view_w / self.zoom
+        world_view_h = self.view_h / self.zoom
         min_tx = int(self.x // tile_size) - 2
-        max_tx = int((self.x + self.view_w) // tile_size) + 2
+        max_tx = int((self.x + world_view_w) // tile_size) + 2
         min_ty = int(self.y // tile_size) - 2
-        max_ty = int((self.y + self.view_h) // tile_size) + 2
+        max_ty = int((self.y + world_view_h) // tile_size) + 2
         return min_tx, max_tx, min_ty, max_ty

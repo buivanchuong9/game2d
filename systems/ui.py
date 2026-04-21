@@ -4,7 +4,7 @@ import os
 
 # Absolute path of the game directory — used to resolve all asset paths
 # without relying on the working directory (no os.chdir here).
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 def load_ui_font(size, bold=False):
 	# Prefer fonts with broad Unicode coverage so Vietnamese accents render correctly.

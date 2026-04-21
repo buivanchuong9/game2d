@@ -83,15 +83,19 @@ class Skill:
     def draw(self, surface, camera=None):
         for eff in self.active_effects:
             draw_pos = (eff[0], eff[1])
+            zoom = 1.0
             if camera:
                 draw_pos = camera.world_to_screen(eff[0], eff[1])
+                zoom = camera.zoom
             
             if self.effect_frames:
                 frame = self.effect_frames[eff[3]]
+                if zoom != 1.0:
+                    frame = pygame.transform.scale(frame, (int(frame.get_width() * zoom), int(frame.get_height() * zoom)))
                 rect = frame.get_rect(center=draw_pos)
                 surface.blit(frame, rect)
             else:
-                pygame.draw.circle(surface, (255, 255, 0), draw_pos, 20, 2)
+                pygame.draw.circle(surface, (255, 255, 0), draw_pos, int(20 * zoom), 2)
 
 class SkillManager:
     def __init__(self):

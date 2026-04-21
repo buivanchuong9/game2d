@@ -80,11 +80,16 @@ PROPS = {
     "gate_open": safe_load("Sprites/Sprites_Environment/props/gate_open_64.png", (64, 64)),
 }
 
-def draw_prop(surface, prop_key: str, sx: int, sy: int):
+def draw_prop(surface, prop_key: str, sx: int, sy: int, scale: float = 1.0):
     spr = PROPS.get(prop_key)
     if spr is None:
         return
-    surface.blit(spr, (sx, sy + TILE_SIZE - spr.get_height()))
+    if scale != 1.0:
+        sw = int(spr.get_width() * scale)
+        sh = int(spr.get_height() * scale)
+        spr = pygame.transform.scale(spr, (sw, sh))
+    # Offset y to stick to the bottom of the tile
+    surface.blit(spr, (sx, sy + int(TILE_SIZE * scale) - spr.get_height()))
 
 def obstacle_prop_for_tile(chapter_id: str, tx: int, ty: int):
     if tx in (0, GRID_SIZE - 1) or ty in (0, GRID_SIZE - 1):
