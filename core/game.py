@@ -1,11 +1,6 @@
-from core.game import main
-
-
-if __name__ == "__main__":
-    main()
 # Resolve working directory FIRST before any imports that load assets
 import os as _os
-_os.chdir(_os.path.dirname(_os.path.abspath(__file__)))
+_os.chdir(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
 
 # NOTE: map_props import is deferred to after pygame.display.set_mode()
 # because safe_load calls convert_alpha() which requires an initialized display.
@@ -26,10 +21,10 @@ import random
 import sys
 import glob
 from dataclasses import dataclass, field
-from armory_data import ARMORY, RARITY_COLORS
+from combat.armory_data import ARMORY, RARITY_COLORS
 from scratch.print_map import carve
-from audio import play_bg_music, play_sound_effect
-from data import ItemPickup, Particle, NPC, Chapter, StoryEnemy, EscortTank, MissionTracker
+from systems.audio import play_bg_music, play_sound_effect
+from models.data import ItemPickup, Particle, NPC, Chapter, StoryEnemy, EscortTank, MissionTracker
 
 # Định nghĩa các màu cơ bản
 BLACK = (0, 0, 0)
@@ -54,21 +49,21 @@ screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SCALED | 
 pygame.display.set_caption("Last Roof: Escape City")
 clock = pygame.time.Clock()
 
-from enemy import FlyingEye, Goblin, Mushroom, Skeleton, BigFlyingEye, DashingGoblin, TeleportingMushroom, EvilWizard, OldGuardian
-from pathfinding import a_star, bfs, dfs, greedy_safe
-from player import Player
-from weapon import WeaponManager
-from all_graphics import ALL_GRAPHICS
-from camera import Camera
-from ui import load_ui_font, wrap_text, safe_load, safe_sheet_frame
+from entities.enemy import FlyingEye, Goblin, Mushroom, Skeleton, BigFlyingEye, DashingGoblin, TeleportingMushroom, EvilWizard, OldGuardian
+from systems.pathfinding import a_star, bfs, dfs, greedy_safe
+from entities.player import Player
+from combat.weapon import WeaponManager
+from content.all_graphics import ALL_GRAPHICS
+from systems.camera import Camera
+from systems.ui import load_ui_font, wrap_text, safe_load, safe_sheet_frame
 
 # --- Map props loaded HERE after display is initialized ---
-from map_props import CHAPTER_TILES, DESERT_TILE, DESERT_TILE_ALT, DESERT_WALL, DESERT_GRASS, DESERT_GRASS_TUFT, DESERT_HUT, DESERT_BIG_GRASS, DESERT_BIG_ROCK, obstacle_prop_for_tile, draw_prop
+from world.map_props import CHAPTER_TILES, DESERT_TILE, DESERT_TILE_ALT, DESERT_WALL, DESERT_GRASS, DESERT_GRASS_TUFT, DESERT_HUT, DESERT_BIG_GRASS, DESERT_BIG_ROCK, obstacle_prop_for_tile, draw_prop
 
-from audio import SOUND_EFFECTS, SOUND_BY_BASENAME, load_sounds
+from systems.audio import SOUND_EFFECTS, SOUND_BY_BASENAME, load_sounds
 
 # Load all graphics with absolute paths via BASE_DIR from ui.py
-from ui import BASE_DIR as _ASSET_BASE
+from systems.ui import BASE_DIR as _ASSET_BASE
 ALL_GRAPHICS_SURFACES = {}
 for _gfx_path in ALL_GRAPHICS:
     try:
@@ -77,22 +72,22 @@ for _gfx_path in ALL_GRAPHICS:
     except Exception as _e:
         print(f"[GRAPHICS LOAD ERROR] {_gfx_path}: {_e}")
 
-from skill import SkillManager, Skill
+from combat.skill import SkillManager, Skill
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # already chdir'd above
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 INTERACT_RADIUS = 60
 TILE_SIZE = 16
 GRID_SIZE = 44
 
 
-from shop import SHOP_CARD_SURFACES, get_random_shop_card, get_random_pet_card
+from systems.shop import SHOP_CARD_SURFACES, get_random_shop_card, get_random_pet_card
 
 # Sounds loaded via audio module (centralised, absolute paths)
 load_sounds()
 
 
-from map import TILE_SIZE, GRID_SIZE
+from world.map import TILE_SIZE, GRID_SIZE
 TANK_BASE = safe_load("Sprites/Sprites_Building/Towers bases/Tower 06.png", (52, 52))
 TANK_TURRET = safe_load("Sprites/Sprites_Building/RocketLauncher.png", (52, 52))
 ROCKET_PICKUP = safe_load("Sprites/Sprites_Weapon/RPG-reisized.png", (34, 34))
@@ -427,8 +422,8 @@ class MissionTracker:
         return bool(d.get("holdout_complete", False))
 
 
-from camera import Camera
-from npc_data import get_random_npcs_for_chunk, reset_spawned_chunks
+from systems.camera import Camera
+from world.npc_data import get_random_npcs_for_chunk, reset_spawned_chunks
 
 class Game:
     def __init__(self):
