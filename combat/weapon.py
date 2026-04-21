@@ -194,13 +194,13 @@ class Weapon:
         self.x = player_x + math.cos(self.angle) * self.offset
         self.y = player_y + math.sin(self.angle) * self.offset
     
-    def can_shoot(self):
+    def can_shoot(self, fire_rate_mult=1.0):
         if self.reloading:
             return False
         if not self.melee and self.ammo_in_mag <= 0:
             return False
         current_time = pygame.time.get_ticks()
-        return current_time - self.last_shot_time > (1000 / self.fire_rate)
+        return current_time - self.last_shot_time > (1000 / (self.fire_rate * fire_rate_mult))
 
     def start_reload(self):
         if self.melee:
@@ -230,12 +230,12 @@ class Weapon:
         self.reloading = False
         return True
     
-    def shoot(self, target_x, target_y):
+    def shoot(self, target_x, target_y, fire_rate_mult=1.0, damage_mult=1.0):
         # Auto reload on empty
         if not self.melee and self.ammo_in_mag <= 0:
             self.start_reload()
             return False
-        if self.can_shoot():
+        if self.can_shoot(fire_rate_mult):
             # Resolve projectile effect per shot (supports atlas random + list/dict)
             def pick_img(proj):
                 import random
@@ -275,7 +275,7 @@ class Weapon:
                 # Dung hieu ung slash tu projectile_image
                 img_path = pick_img(self.projectile_image) if self.projectile_image else None
                 img_path = img_path or "Sprites/Sprites_Effect/Pet_Power.png"
-                slash = Bullet(self.x, self.y, target_x, target_y, speed=0, damage=self.damage, image_path=img_path, scale=self.projectile_scale)
+                slash = Bullet(self.x, self.y, target_x, target_y, speed=0, damage=self.damage * damage_mult, image_path=img_path, scale=self.projectile_scale)
                 slash.setup_melee(lifetime=15)
                 self.bullets.append(slash)
             else:
@@ -292,7 +292,7 @@ class Weapon:
                         target_x,
                         target_y,
                         speed=self.projectile_speed,
-                        damage=self.damage,
+                        damage=self.damage * damage_mult,
                         radius=self.projectile_radius,
                         image_path=img,
                         scale=self.projectile_scale,
@@ -450,7 +450,7 @@ class WeaponManager:
         index = self.weapons.index(self.current_weapon)
         self.current_weapon = self.weapons[(index + direction) % len(self.weapons)]
     
-    def update(self, player_x, player_y, target_x, target_y, is_shooting, enemies, blocked_tiles=None):
+    def update(self, player_x, player_y, target_x, target_y, is_shooting, enemies, blocked_tiles=None, fire_rate_mult=1.0, damage_mult=1.0):
         if not self.current_weapon:
             return False
 
@@ -461,7 +461,7 @@ class WeaponManager:
                 self.on_event("reload_complete", self.current_weapon)
         shot_fired = False
         if is_shooting:
-            shot_fired = self.current_weapon.shoot(target_x, target_y)
+            shot_fired = self.current_weapon.shoot(target_x, target_y, fire_rate_mult, damage_mult)
             if shot_fired:
                 if self.on_event:
                     self.on_event("shot", self.current_weapon)
