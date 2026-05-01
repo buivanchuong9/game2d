@@ -703,7 +703,7 @@ class Game:
         self.current_blocked = new_blocked
         # Update enemy pathfinding grids
         for entry in self.story_enemies:
-            entry.enemy.obstacle_map = self.build_obstacle_grid()
+            entry.enemy.obstacle_map = self._cached_obstacle_set
 
     def build_chapters(self):
         def ring_walls():
@@ -1256,6 +1256,9 @@ class Game:
         self.frenzy_window_until = 0
         self.last_spawn_at = pygame.time.get_ticks()
         self.tank = EscortTank(self.player.x - 70, self.player.y + 50)
+        self._cached_obstacle_set = set()
+        self._cached_tile_zoom = 1.0
+        self._cached_scaled_tiles = {}
 
         def is_yard_tile(tile: tuple[int, int]) -> bool:
             # Right/bottom quadrant: treated as outside yard in ground chapter
@@ -1280,11 +1283,11 @@ class Game:
                 enemy = enemy_cls(ex, ey)
                 enemy.health = archetype.get("health", 100)
                 enemy.max_health = archetype.get("health", 100)
-                enemy.obstacle_map = self.build_obstacle_grid()
+                enemy.obstacle_map = self._cached_obstacle_set
                 self.story_enemies.append(StoryEnemy(enemy, "boss", grid_pos))
             else:
                 enemy = enemy_cls(ex, ey)
-                enemy.obstacle_map = self.build_obstacle_grid()
+                enemy.obstacle_map = self._cached_obstacle_set
                 self.story_enemies.append(StoryEnemy(enemy, archetype, grid_pos))
 
         # Finite spawn budget for this chapter (bắn hết là hết)
@@ -1373,7 +1376,8 @@ class Game:
         for npc in self.chapter.npcs:
             nx = npc.grid_pos[0] * TILE_SIZE + TILE_SIZE // 2
             ny = npc.grid_pos[1] * TILE_SIZE + TILE_SIZE // 2
-            if math.hypot(nx - self.player.x, ny - self.player.y) <= INTERACT_RADIUS:
+            dx = nx - self.player.x; dy = ny - self.player.y
+            if dx * dx + dy * dy <= INTERACT_RADIUS * INTERACT_RADIUS:
                 return npc
         return None
 
@@ -1639,7 +1643,7 @@ class Game:
             if pos in self.current_blocked:
                 self.current_blocked.remove(pos)
         for story_enemy in self.story_enemies:
-            story_enemy.enemy.obstacle_map = self.build_obstacle_grid()
+            story_enemy.enemy.obstacle_map = self._cached_obstacle_set
 
     def activate_box(self, tile):
         cid = self.chapter.id
@@ -1740,6 +1744,7 @@ class Game:
             # Update camera to follow player and CLAMP to world edges (keeps map on screen)
             self.camera.update(self.player.x, self.player.y, world_w=self.world_w, world_h=self.world_h)
             
+            self._cached_obstacle_set = self.build_obstacle_grid()
             self.update_enemies()
             self.spawn_dynamic_enemies()
             self._trigger_clear_dialog_if_ready()
@@ -1823,7 +1828,7 @@ class Game:
         ex = tile[0] * TILE_SIZE + TILE_SIZE // 2
         ey = tile[1] * TILE_SIZE + TILE_SIZE // 2
         enemy = enemy_cls(ex, ey)
-        enemy.obstacle_map = self.build_obstacle_grid()
+        enemy.obstacle_map = self._cached_obstacle_set
         archetype = "basic"
         if enemy_cls in (DashingGoblin, FlyingEye):
             archetype = "fast"
@@ -1846,7 +1851,7 @@ class Game:
                 play_sound_effect("sfx_enemy_hit")
             entry._last_health = cur_hp
 
-            enemy.obstacle_map = self.build_obstacle_grid()
+            enemy.obstacle_map = self._cached_obstacle_set
             enemy.update(self.player)
             enemy.x = max(TILE_SIZE, min(enemy.x, MAP_WIDTH - TILE_SIZE))
             enemy.y = max(TILE_SIZE, min(enemy.y, MAP_HEIGHT - TILE_SIZE))
@@ -2007,7 +2012,7 @@ class Game:
                 ex = grid_pos[0] * TILE_SIZE + TILE_SIZE // 2
                 ey = grid_pos[1] * TILE_SIZE + TILE_SIZE // 2
                 enemy = enemy_cls(ex, ey)
-                enemy.obstacle_map = self.build_obstacle_grid()
+                enemy.obstacle_map = self._cached_obstacle_set
                 arch = "boss" if isinstance(archetype, dict) and archetype.get("type") == "boss" else archetype
                 self.story_enemies.append(StoryEnemy(enemy, arch, grid_pos))
             self.popup = "Tiếng cổng sắt vang lên... Quái ngoài sân đã phát hiện bạn!"
@@ -2333,7 +2338,9 @@ class Game:
             elif (t // 180) % 9 == 0:
                 base_alpha = 160
 
-        darkness = pygame.Surface((MAP_WIDTH, MAP_HEIGHT), pygame.SRCALPHA)
+        if not hasattr(self, "_darkness_surf"):
+            self._darkness_surf = pygame.Surface((MAP_WIDTH, MAP_HEIGHT), pygame.SRCALPHA)
+        darkness = self._darkness_surf
         darkness.fill((0, 0, 0, base_alpha))
 
         # Light around player: "cut out" with gradient circles
@@ -2361,6 +2368,10 @@ class Game:
         else:
             base_1, base_2, wall_tile = current_tiles["floor1"], current_tiles["floor2"], current_tiles["wall"]
 
+        zoom = self.camera.zoom
+        if zoom != self._cached_tile_zoom:
+            self._cached_scaled_tiles.clear()
+            self._cached_tile_zoom = zoom
         for ty in range(max(0, min_ty), min(GRID_SIZE, max_ty + 1)):
             for tx in range(max(0, min_tx), min(GRID_SIZE, max_tx + 1)):
                 sx, sy = self.camera.world_to_screen(tx * TILE_SIZE, ty * TILE_SIZE)
@@ -2376,7 +2387,12 @@ class Game:
                     base_tile = base_2 if (tx * 3 + ty * 5) % 11 == 0 else base_1
                     if self.camera.zoom != 1.0:
                         scaled_size = (int(TILE_SIZE * self.camera.zoom), int(TILE_SIZE * self.camera.zoom))
+                        key = ("floor", int(TILE_SIZE * zoom))
+                    if key in self._cached_scaled_tiles:
+                        base_tile = self._cached_scaled_tiles[key]
+                    else:
                         base_tile = pygame.transform.scale(base_tile, scaled_size)
+                        self._cached_scaled_tiles[key] = base_tile
                     surface.blit(base_tile, (sx, sy))
 
                 if (tx, ty) in self.current_blocked:
@@ -2384,7 +2400,12 @@ class Game:
                     w_tile = wall_tile
                     if self.camera.zoom != 1.0:
                         scaled_size = (int(TILE_SIZE * self.camera.zoom), int(TILE_SIZE * self.camera.zoom))
+                        key = ("wall", int(TILE_SIZE * zoom))
+                    if key in self._cached_scaled_tiles:
+                        w_tile = self._cached_scaled_tiles[key]
+                    else:
                         w_tile = pygame.transform.scale(wall_tile, scaled_size)
+                        self._cached_scaled_tiles[key] = w_tile
                     surface.blit(w_tile, (sx, sy))
                     # Optional sparse contextual props
                     prop_key = obstacle_prop_for_tile(self.chapter.id, tx, ty)
