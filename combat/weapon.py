@@ -65,7 +65,7 @@ class Bullet:
                 rect = rect.clip(sheet.get_rect())
                 img = sheet.subsurface(rect).copy()
 
-            self.original_image = pygame.transform.scale(img, scale)
+            self.original_image = pygame.transform.smoothscale(img, scale)
         except Exception:
             self.original_image = pygame.Surface(scale, pygame.SRCALPHA)
             pygame.draw.circle(self.original_image, (255, 220, 120, 220), (scale[0] // 2, scale[1] // 2), max(2, min(scale) // 4))
@@ -512,3 +512,4 @@ class WeaponManager:
     def draw(self, surface, camera=None):
         if self.current_weapon:
             self.current_weapon.draw(surface, camera)
+
