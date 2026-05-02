@@ -78,3 +78,4 @@ def safe_sheet_frame(path, rect, size):
 # Tách các hàm và class liên quan đến UI từ main.py
 
 # Để trống, sẽ bổ sung sau khi tách xong các phần liên quan
+
