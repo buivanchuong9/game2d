@@ -39,3 +39,7 @@ dist/
 *.swp
 *.bak
 *.tmp
+
+.agents/
+
+skills-lock.json
