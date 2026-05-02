@@ -243,9 +243,7 @@ class Enemy:
 
         # Resolve collisions with walls
         if hasattr(self, 'obstacle_map') and self.obstacle_map is not None:
-            obstacles = self.obstacle_map if isinstance(self.obstacle_map, set) else set(
-                (x, y) for y, row in enumerate(self.obstacle_map) for x, val in enumerate(row) if val
-            )
+            obstacles = self.obstacle_map
             enemy_rect = pygame.Rect(0, 0, 24, 24)
             enemy_rect.center = (self.x, self.y)
             ex, ey = int(self.x // 16), int(self.y // 16)
