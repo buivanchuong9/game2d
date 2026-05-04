@@ -552,6 +552,8 @@ class Game:
         self.set_map_background_by_index(0)
         self.exit_path = []
         self.exit_path_timer = 0
+        self.hint_modes = ["BFS", "DFS", "SAFE", "A*"]
+        self.hint_mode_index = 0
         
         self.popup = ""
         self.popup_timer = 0
@@ -2206,7 +2208,12 @@ class Game:
         blocked = self.current_blocked
         
         if start and goal:
-            self.exit_path = bfs(start, goal, GRID_SIZE, GRID_SIZE, blocked)
+            mode = self.hint_modes[self.hint_mode_index]
+            if mode == "DFS":
+                from pathfinding import dfs
+                self.exit_path = dfs(start, goal, GRID_SIZE, GRID_SIZE, blocked)
+            else:
+                self.exit_path = bfs(start, goal, GRID_SIZE, GRID_SIZE, blocked)
 
     def draw_path_overlay(self, surface):
         """Draw the BFS path for the player."""

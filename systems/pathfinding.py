@@ -43,3 +43,44 @@ def bfs(start, goal, width, height, blocked):
         current = came_from[current]
     path.reverse()
     return path
+
+def dfs(start, goal, width, height, blocked):
+    """
+    Tìm đường đi từ start đến goal bằng thuật toán DFS.
+    """
+    if not start or not goal:
+        return []
+    
+    stack = [start]
+    came_from = {start: None}
+    
+    if isinstance(blocked, list):
+        obstacles = set((x, y) for y, row in enumerate(blocked) for x, val in enumerate(row) if val)
+    else:
+        obstacles = blocked
+
+    found = False
+    while stack:
+        current = stack.pop()
+        
+        if current == goal:
+            found = True
+            break
+            
+        x, y = current
+        for nx, ny in [(x+1, y), (x-1, y), (x, y+1), (x, y-1)]:
+            if 0 <= nx < width and 0 <= ny < height:
+                if (nx, ny) not in obstacles and (nx, ny) not in came_from:
+                    came_from[(nx, ny)] = current
+                    stack.append((nx, ny))
+                    
+    if not found:
+        return []
+        
+    path = []
+    current = goal
+    while current is not None:
+        path.append(current)
+        current = came_from[current]
+    path.reverse()
+    return path
