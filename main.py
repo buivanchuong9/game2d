@@ -1332,6 +1332,15 @@ class Game:
     def current_tile(self):
         return (int(self.player.x // TILE_SIZE), int(self.player.y // TILE_SIZE))
 
+    def item_pickup_rect(self, item, inflate=8):
+        rect = pygame.Rect(item.grid_pos[0] * TILE_SIZE, item.grid_pos[1] * TILE_SIZE, TILE_SIZE, TILE_SIZE)
+        if inflate:
+            rect = rect.inflate(inflate, inflate)
+        return rect
+
+    def player_can_pick_item(self, item, inflate=8):
+        return self.player.get_rect().colliderect(self.item_pickup_rect(item, inflate=inflate))
+
     def item_at_player(self):
         for item in self.chapter.items:
             # Money is auto-picked up; never require E
@@ -1438,7 +1447,7 @@ class Game:
             )
         )
 
-    def spawn_mission_item_at(self, tile: tuple[int, int], item_type: str, name: str, description: str, color=YELLOW):
+    def spawn_mission_item_at(self, tile: tuple[int, int], item_type: str, name: str, description: str, color=YELLOW, amount=0):
         """Spawn a mission item on a walkable tile if free."""
         tx, ty = tile
         if not (1 <= tx < GRID_SIZE - 1 and 1 <= ty < GRID_SIZE - 1):
@@ -1448,7 +1457,7 @@ class Game:
         for it in self.chapter.items:
             if not it.collected and it.grid_pos == (tx, ty):
                 return False
-        self.chapter.items.append(ItemPickup((tx, ty), name, description, item_type, color=color))
+        self.chapter.items.append(ItemPickup((tx, ty), name, description, item_type, amount=amount, color=color))
         play_sound_effect("sfx_item_drop")
         return True
 
@@ -1462,6 +1471,25 @@ class Game:
                     if abs(dx) + abs(dy) != r:
                         continue
                     if self.spawn_mission_item_at((tx + dx, ty + dy), item_type, name, description, color=color):
+                        return True
+        return False
+
+    def spawn_money_drop_near(self, tile: tuple[int, int], amount: int = 1, radius: int = 2):
+        """Spawn money near a tile; avoids blocked tiles so dropped coins are always reachable."""
+        tx, ty = tile
+        for r in range(0, max(0, radius) + 1):
+            for dx in range(-r, r + 1):
+                for dy in range(-r, r + 1):
+                    if abs(dx) + abs(dy) != r:
+                        continue
+                    if self.spawn_mission_item_at(
+                        (tx + dx, ty + dy),
+                        "money",
+                        "Tien",
+                        "1 tien roi tu zombie.",
+                        color=YELLOW,
+                        amount=max(1, int(amount or 1)),
+                    ):
                         return True
         return False
 
@@ -1832,9 +1860,9 @@ class Game:
                 # Stage progression hooks (linear missions)
                 if self.chapter.id == "roof" and self.mission.data.get("weapon_collected") and self.mission.data["zombies_killed"] >= 1:
                     self.mission.data["stage"] = max(int(self.mission.data.get("stage", 0) or 0), 2)
-                # Each kill drops 1 money
+                # Each kill drops 1 money (fallback to nearby free tile if death tile is blocked)
                 etile = entry.tile()
-                self.spawn_mission_item_at(etile, "money", "Tien", "1 tien roi tu zombie.", color=YELLOW)
+                self.spawn_money_drop_near(etile, amount=1, radius=2)
                 if entry.archetype in {"special", "tank"}:
                     self.mission.data["special_kills"] += 1
                 if entry.archetype == "boss":
@@ -2478,6 +2506,9 @@ class Game:
         self.player.regen = attr.get("regen", 0.0)
 
     def draw_chapter_backdrop(self, surface):
+        if self.force_black_map_background:
+            pygame.draw.rect(surface, BLACK, (0, 0, MAP_WIDTH, MAP_HEIGHT))
+            return
         top = self.chapter.chapter_color
         for y in range(0, SCREEN_HEIGHT, 8):
             blend = y / SCREEN_HEIGHT
