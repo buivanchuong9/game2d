@@ -55,7 +55,7 @@ pygame.display.set_caption("Last Roof: Escape City")
 clock = pygame.time.Clock()
 
 from enemy import FlyingEye, Goblin, Mushroom, Skeleton, BigFlyingEye, DashingGoblin, TeleportingMushroom, EvilWizard, OldGuardian
-from pathfinding import a_star, bfs, dfs, greedy_safe
+from pathfinding import bfs
 from player import Player
 from weapon import WeaponManager
 from all_graphics import ALL_GRAPHICS
@@ -483,7 +483,7 @@ class Game:
                 play_sound_effect(f"sfx_reload_{wtype}")
         self.weapon_manager.on_event = _weapon_event
         self.story_flags = set()
-        self.last_hint_path = []
+        self.exit_path = []
         self.last_spawn_at = 0
         self.shot_counter = 0
         self.frenzy_window_until = 0
@@ -550,8 +550,8 @@ class Game:
         self.map_world_surface = None
         self.map_surface_cache = {}
         self.set_map_background_by_index(0)
-        self.hint_mode_index = 0
-        self.hint_modes = ["BFS", "DFS", "SAFE", "A*"]
+        self.exit_path = []
+        self.exit_path_timer = 0
         
         self.popup = ""
         self.popup_timer = 0
@@ -1222,7 +1222,7 @@ class Game:
         self.dialog_lines = []
         self.dialog_queue = []
         self.show_map = False
-        self.hint_mode_index = 0
+        self.exit_path = []
         self.next_chapter_ready = False
         self.exit_unlocked = False
         self.yard_spawned = False
@@ -1230,7 +1230,6 @@ class Game:
         self.yard_gate_tile = (26, 22)
         self.last_objective_text = self.objective_label() if self.chapter else ""
         self.objective_flash_until = pygame.time.get_ticks() + 1800
-        self.last_hint_path = []
         self.beacon_started_at = 0
         self.holdout_until = 0
         self.mouse_down = False
@@ -1730,12 +1729,17 @@ class Game:
                 fire_rate_mult=getattr(self.player, "fire_rate_mult", 1.0),
                 damage_mult=getattr(self.player, "damage_mult", 1.0)
             )
+
+            # Update exit path every 60 frames (1s) to save performance
+            self.exit_path_timer -= 1
+            if self.exit_path_timer <= 0:
+                self.update_exit_path()
+                self.exit_path_timer = 60
             
             self.skill_manager.update([entry.enemy for entry in self.story_enemies], self.current_blocked)
             self.update_particles()
             self.handle_progression()
             self.check_auto_transition()
-            self.update_hint_path()
 
             # Player hit SFX (throttled)
             now = pygame.time.get_ticks()
@@ -2162,70 +2166,38 @@ class Game:
             return "Kích hoạt beacon"
         return "Ra điểm trực thăng"
 
-    def auto_select_hint_mode(self):
-        cid = self.chapter.id
-        if cid == "roof":
-            self.hint_mode_index = 0
-            return
-        if cid == "office":
-            if not self.mission.data["keycard_collected"] or not self.mission.data["npc_saved"]:
-                self.hint_mode_index = 1
-            else:
-                self.hint_mode_index = 0
-            return
-        if cid == "medical":
-            if not self.mission.data["gate_opened"]:
-                self.hint_mode_index = 2
-            else:
-                self.hint_mode_index = 3
-            return
-        self.hint_mode_index = 3 if self.mission.data["signal_started"] else 2
-
-    def unexplored_goals(self):
-        goals = set()
-        for item in self.chapter.items:
-            if not item.collected:
-                goals.add(item.grid_pos)
-        for npc in self.chapter.npcs:
-            if not npc.interacted:
-                goals.add(npc.grid_pos)
-        if self.chapter.exit_pos:
-            goals.add(self.chapter.exit_pos)
-        return goals
-
-    def update_hint_path(self):
-        self.auto_select_hint_mode()
+    def update_exit_path(self):
+        """Update the BFS path to the current objective or exit portal."""
         current_objective = self.objective_label()
         if current_objective != self.last_objective_text:
             self.last_objective_text = current_objective
             self.objective_flash_until = pygame.time.get_ticks() + 1800
+        
         start = self.current_tile()
         goal = self.objective_tile()
-        danger = self.build_danger_map()
         blocked = self.current_blocked
-        mode = self.hint_modes[self.hint_mode_index]
-        if mode == "BFS":
-            self.last_hint_path = bfs(start, goal, GRID_SIZE, GRID_SIZE, blocked)
-        elif mode == "DFS":
-            self.last_hint_path = dfs(start, self.unexplored_goals(), GRID_SIZE, GRID_SIZE, blocked)
-        elif mode == "SAFE":
-            self.last_hint_path = greedy_safe(start, goal, GRID_SIZE, GRID_SIZE, blocked, danger)
-        else:
-            self.last_hint_path = a_star(start, goal, GRID_SIZE, GRID_SIZE, blocked, danger)
+        
+        if start and goal:
+            self.exit_path = bfs(start, goal, GRID_SIZE, GRID_SIZE, blocked)
 
     def draw_path_overlay(self, surface):
-        if not self.last_hint_path: return
-        mode = self.hint_modes[self.hint_mode_index]
-        color = CYAN if mode == "A*" else GREEN if mode == "BFS" else RED if mode == "DFS" else YELLOW
+        """Draw the BFS path for the player."""
+        if not self.exit_path or len(self.exit_path) < 2: 
+            return
+            
+        # Bright Cyan/Green that glows in the dark
+        color = (0, 255, 255) 
         points = []
-        for x, y in self.last_hint_path:
+        for x, y in self.exit_path:
             sx, sy = self.camera.world_to_screen(x * TILE_SIZE + 8, y * TILE_SIZE + 8)
             points.append((sx, sy))
+            
         if len(points) > 1:
-            pygame.draw.lines(surface, color, False, points, 3)
-            # Draw node pulses for clarity
+            # Draw a thicker glowing line
+            pygame.draw.lines(surface, color, False, points, 4)
+            # Draw start and end markers
             for i, p in enumerate(points):
-                if i % 3 == 0:
+                if i % 4 == 0:
                     pygame.draw.circle(surface, color, p, 3)
 
     def draw(self):
@@ -2249,12 +2221,15 @@ class Game:
     def draw_world(self):
         # We don't use a separate world_surface for infinite map because it's too large
         self.render_world(screen)
-        self.draw_path_overlay(screen)
         # Vẽ hiệu ứng kỹ năng
         self.skill_manager.draw(screen, self.camera)
 
         # Darkness overlay (power-out ambience)
         self.draw_darkness(screen)
+
+        # DRAW PATH ON TOP OF DARKNESS so it glows
+        self.draw_path_overlay(screen)
+
         # HUD mission always visible
         self.draw_mission_hud(screen)
 
@@ -2619,8 +2594,8 @@ class Game:
             if not entry.enemy.is_dead:
                 ex, ey = entry.tile()
                 pygame.draw.circle(screen, RED, (int(rect.x + ex * sx), int(rect.y + ey * sy)), 2)
-        if self.last_hint_path:
-            for tile in self.last_hint_path:
+        if self.exit_path:
+            for tile in self.exit_path:
                 pygame.draw.rect(screen, YELLOW, (rect.x + tile[0] * sx, rect.y + tile[1] * sy, max(1, sx), max(1, sy)), 1)
         px, py = self.current_tile()
         pygame.draw.circle(screen, WHITE, (int(rect.x + px * sx), int(rect.y + py * sy)), 3)
@@ -2778,7 +2753,7 @@ class Game:
                 pygame.draw.rect(screen, item.color, (rect.x + item.grid_pos[0] * scale, rect.y + item.grid_pos[1] * scale, scale, scale))
         for npc in self.chapter.npcs:
             pygame.draw.circle(screen, CYAN, (int(rect.x + npc.grid_pos[0] * scale), int(rect.y + npc.grid_pos[1] * scale)), 4)
-        for tile in self.last_hint_path:
+        for tile in self.exit_path:
             pygame.draw.rect(screen, YELLOW, (rect.x + tile[0] * scale, rect.y + tile[1] * scale, scale, scale), 1)
         px, py = self.current_tile()
         pygame.draw.circle(screen, WHITE, (int(rect.x + px * scale), int(rect.y + py * scale)), 5)

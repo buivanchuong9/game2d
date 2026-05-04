@@ -55,6 +55,7 @@ class IdleState(AIState):
 class ChaseState(AIState):
     def enter(self, enemy, player):
         enemy.current_action = 'run'
+        enemy.path_timer = 0  # Force immediate path calculation
 
     def update(self, enemy, player):
         dx = player.x - enemy.x
@@ -66,11 +67,8 @@ class ChaseState(AIState):
         elif distance > enemy.lose_aggro_range:
             return IdleState()
 
-        # Pathfinding logic
-        if distance >0 :
-            enemy.x += dx / distance * enemy.speed
-            enemy.y += dy / distance * enemy.speed
-
+        # ChaseState now just ensures we are in the right mode; 
+        # base Enemy.update handles the actual pathfollowing.
         return None
 
 
@@ -144,6 +142,8 @@ class Enemy:
         self.current_patrol_point = 0
         self.obstacle_map = None
         self.fov = 120  # Field of view in degrees
+        self.path = []
+        self.path_timer = 0
 
         # Add AI states
         self.state_machine = StateMachine()
@@ -229,16 +229,42 @@ class Enemy:
             self.previous_action = self.current_action  # Update previous action
 
         if distance > self.acceptance_radius:  # Move only if outside acceptance radius
-            dx /= distance
-            dy /= distance
-            # Move enemy towards player's center
-            self.x += dx * self.speed
-            self.y += dy * self.speed
+            # Pathfinding logic: update path periodically
+            self.path_timer -= 1
+            if self.path_timer <= 0:
+                self.path = self.pathfind_to_player(player)
+                self.path_timer = 40 + random.randint(0, 20) # Randomize to stagger calculations
+
+            move_dx, move_dy = dx, dy
+            move_dist = distance
+
+            if self.path:
+                target_pt = self.path[0]
+                pdx = target_pt[0] - self.x
+                pdy = target_pt[1] - self.y
+                pdist = math.hypot(pdx, pdy)
+                
+                if pdist < 8:
+                    self.path.pop(0)
+                    if self.path:
+                        target_pt = self.path[0]
+                        pdx = target_pt[0] - self.x
+                        pdy = target_pt[1] - self.y
+                        pdist = math.hypot(pdx, pdy)
+                
+                if pdist > 0:
+                    move_dx, move_dy = pdx, pdy
+                    move_dist = pdist
+
+            # Move enemy
+            if move_dist > 0:
+                self.x += (move_dx / move_dist) * self.speed
+                self.y += (move_dy / move_dist) * self.speed
 
             # Update direction only when moving
-            if dx > 0:
+            if move_dx > 0:
                 self.look_right = True
-            elif dx < 0:
+            elif move_dx < 0:
                 self.look_right = False
 
         # Resolve collisions with walls
@@ -312,26 +338,47 @@ class Enemy:
 
     def pathfind_to_player(self, player):
         """A* pathfinding implementation with grid-based coordinates"""
+        if self.obstacle_map is None:
+            return []
+
         # Convert pixel positions to grid coordinates
         start_x = int(self.x // 16)
         start_y = int(self.y // 16)
         goal_x = int(player.x // 16)
         goal_y = int(player.y // 16)
         
+        # Clamp to map bounds
+        if isinstance(self.obstacle_map, set):
+            # If it's a set, we don't have direct bounds, use default GRID_SIZE
+            max_x, max_y = 44, 44 
+        else:
+            max_y = len(self.obstacle_map)
+            max_x = len(self.obstacle_map[0]) if max_y > 0 else 0
+        
+        start_x = max(0, min(start_x, max_x - 1))
+        start_y = max(0, min(start_y, max_y - 1))
+        goal_x = max(0, min(goal_x, max_x - 1))
+        goal_y = max(0, min(goal_y, max_y - 1))
+
         start = (start_x, start_y)
         goal = (goal_x, goal_y)
         
+        if start == goal:
+            return []
+
         frontier = PriorityQueue()
-        frontier.put(start, 0)
+        frontier.put((0, start))
         came_from = {}
         cost_so_far = {}
         came_from[start] = None
         cost_so_far[start] = 0
         
+        found = False
         while not frontier.empty():
-            current = frontier.get()
+            current = frontier.get()[1]
             
             if current == goal:
+                found = True
                 break
                 
             for next in self.get_neighbors(current):
@@ -339,18 +386,21 @@ class Enemy:
                 if next not in cost_so_far or new_cost < cost_so_far[next]:
                     cost_so_far[next] = new_cost
                     priority = new_cost + self.heuristic(goal, next)
-                    frontier.put(next, priority)
+                    frontier.put((priority, next))
                     came_from[next] = current
         
+        if not found:
+            return []
+
         # Reconstruct path and convert back to pixel coordinates
         path = []
         current = goal
-        while current != start:
+        while current != start and current in came_from:
             path.append((
                 current[0] * 16 + 16//2,
                 current[1] * 16 + 16//2
             ))
-            current = came_from.get(current, start)  # Fallback to start if path not found
+            current = came_from[current]
         path.reverse()
         return path
     
@@ -443,10 +493,15 @@ class Enemy:
         
         # Filter valid neighbors within map bounds and not blocked
         valid_neighbors = []
+        is_set = isinstance(self.obstacle_map, set)
         for nx, ny in neighbors:
             if 0 <= nx < 44 and 0 <= ny < 44:
-                if not self.obstacle_map[ny][nx]:  # Note: obstacle_map is [y][x]
-                    valid_neighbors.append((nx, ny))
+                if is_set:
+                    if (nx, ny) not in self.obstacle_map:
+                        valid_neighbors.append((nx, ny))
+                else:
+                    if not self.obstacle_map[ny][nx]:  # Note: obstacle_map is [y][x]
+                        valid_neighbors.append((nx, ny))
         return valid_neighbors
 
     def heuristic(self, a, b):
