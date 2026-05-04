@@ -46,43 +46,51 @@ class Bullet:
         self.exploded = False
         self.explosion_timer = 0
         
-        # Load and scale bullet image (safe fallback if missing/unsupported)
-        # Supports atlas slicing with syntax: "path#x,y,w,h"
-        try:
-            path = image_path
-            rect = None
-            if "#" in image_path:
-                path, spec = image_path.split("#", 1)
-                parts = [p.strip() for p in spec.split(",")]
-                if len(parts) == 4:
-                    rect = pygame.Rect(int(parts[0]), int(parts[1]), int(parts[2]), int(parts[3]))
-
-            sheet = _sheet(path)
-
-            img = sheet
-            if rect is not None:
-                # Clamp rect into image bounds
-                rect = rect.clip(sheet.get_rect())
-                img = sheet.subsurface(rect).copy()
-
-            self.original_image = pygame.transform.scale(img, scale)
-            # Flip horizontally as melee slashes in this pack often face the wrong way
-            self.original_image = pygame.transform.flip(self.original_image, True, False)
-        except Exception:
-            self.original_image = pygame.Surface(scale, pygame.SRCALPHA)
-            pygame.draw.circle(self.original_image, (255, 220, 120, 220), (scale[0] // 2, scale[1] // 2), max(2, min(scale) // 4))
-
         # Calculate direction vector
         dx = target_x - x
         dy = target_y - y
         distance = math.sqrt(dx**2 + dy**2)
         self.dx = (dx / distance) * speed if distance > 0 else 0
         self.dy = (dy / distance) * speed if distance > 0 else 0
-        
-        # Calculate angle and rotate image
         self.angle = math.degrees(math.atan2(dy, dx))
-        self.image = pygame.transform.rotate(self.original_image, -self.angle)
-        self.timer = 180 # Lifetime in frames
+
+        # Load and scale bullet image(s)
+        self.frames = []
+        try:
+            if isinstance(image_path, (list, tuple)):
+                paths = image_path
+            else:
+                paths = [image_path]
+
+            for p in paths:
+                path = p
+                rect = None
+                if "#" in p:
+                    path, spec = p.split("#", 1)
+                    parts = [pt.strip() for pt in spec.split(",")]
+                    if len(parts) == 4:
+                        rect = pygame.Rect(int(parts[0]), int(parts[1]), int(parts[2]), int(parts[3]))
+
+                sheet = _sheet(path)
+                img = sheet
+                if rect is not None:
+                    rect = rect.clip(sheet.get_rect())
+                    img = sheet.subsurface(rect).copy()
+                
+                # Rotate based on direction
+                scaled = pygame.transform.scale(img, scale)
+                rotated = pygame.transform.rotate(scaled, -self.angle)
+                self.frames.append(rotated)
+
+        except Exception:
+            surf = pygame.Surface(scale, pygame.SRCALPHA)
+            pygame.draw.circle(surf, (255, 220, 120, 220), (scale[0] // 2, scale[1] // 2), max(2, min(scale) // 4))
+            self.frames = [surf]
+
+        self.current_frame_idx = 0
+        self.anim_timer = 0
+        self.anim_speed = 0.25 # Adjusted speed
+        self.timer = 180 
         self.melee = False
         
     def setup_melee(self, lifetime=12):
@@ -96,9 +104,17 @@ class Bullet:
         if self.exploded:
             self.explosion_timer -= 1
             return
+        
         self.timer -= 1
         self.x += self.dx
         self.y += self.dy
+        
+        # Animate frames
+        if len(self.frames) > 1:
+            self.anim_timer += self.anim_speed
+            if self.anim_timer >= 1:
+                self.anim_timer = 0
+                self.current_frame_idx = (self.current_frame_idx + 1) % len(self.frames)
 
     def explode(self):
         self.exploded = True
@@ -116,7 +132,7 @@ class Bullet:
             pygame.draw.circle(surface, (255, 220, 120), draw_pos, max(6, int(self.radius * zoom // 2)))
             return
         
-        img = self.image
+        img = self.frames[self.current_frame_idx]
         if zoom != 1.0:
             img = pygame.transform.scale(img, (int(img.get_width() * zoom), int(img.get_height() * zoom)))
         
@@ -251,7 +267,10 @@ class Weapon:
                     tw = int(proj.get("tile_w", tile[0] if isinstance(tile, (list, tuple)) and len(tile) >= 1 else 16))
                     th = int(proj.get("tile_h", tile[1] if isinstance(tile, (list, tuple)) and len(tile) >= 2 else 16))
                     coords = proj.get("coords")
+                    animate = proj.get("animate", False)
                     if atlas:
+                        if animate and coords:
+                            return [_slice_spec(atlas, tx * tw, ty * th, tw, th) for (tx, ty) in coords]
                         return _pick_from_atlas(atlas, tw, th, coords=coords)
                 if isinstance(proj, str) and "#RANDOM" in proj:
                     # Syntax: "path#RANDOM,tw,th" or "path#RANDOM,tw,th,tx1:ty1|tx2:ty2..."

@@ -534,6 +534,8 @@ class Game:
         self.shop_categories = ["Weapons", "Pets", "Items"]
         self.pending_transition = False
         self.shop_scroll_y = 0
+        self.show_backpack = False
+        self.autoplay = False
         
         # Weapons are generated from ARMORY
         shop_weapons = []
@@ -1674,7 +1676,7 @@ class Game:
         if self.state == "pause":
             return
         if self.state == "playing":
-            if self.show_shop:
+            if self.show_shop or self.show_backpack:
                 return
             # Pause gameplay while story dialogue is open (Genshin feel)
             if self.dialog_npc:
@@ -3132,8 +3134,9 @@ class Game:
         if ok_rect.collidepoint(mx, my):
             if self.pending_transition:
                 self.set_chapter(self.chapter_index + 1)
-                self.state = "playing"
-                self.pending_transition = False
+                self.shop_scroll_y = 0
+            self.show_backpack = False
+            self.autoplay = False
             self.show_shop = False
             return
 
@@ -3172,8 +3175,11 @@ class Game:
                     wname = sid.replace("buy_weapon_", "")
                     weapon_data = next((w for w in ARMORY if w["name"] == wname), None)
                     if weapon_data:
-                        self.unlock_weapon(dict(weapon_data), equip_now=True)
-                        self.popup = f"Đã mua: {title}"
+                        if len(self.weapon_manager.weapons) >= self.weapon_manager.max_weapons:
+                            self.popup = "Balo vũ khí đã đầy (Tối đa 6)."
+                        else:
+                            self.unlock_weapon(dict(weapon_data), equip_now=True)
+                            self.popup = f"Đã mua: {title}"
                 elif sid.startswith("pet_"):
                     pet_id = sid.replace("pet_", "")
                     if pet_id not in self.unlocked_pets:
@@ -3190,6 +3196,65 @@ class Game:
                 play_sound_effect("sfx_item_drop")
                 return
             
+    def draw_backpack(self):
+        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        overlay.fill((10, 8, 12, 190))
+        screen.blit(overlay, (0, 0))
+        
+        panel_rect = pygame.Rect(200, 100, SCREEN_WIDTH - 400, SCREEN_HEIGHT - 200)
+        pygame.draw.rect(screen, PANEL, panel_rect, border_radius=20)
+        pygame.draw.rect(screen, CYAN, panel_rect, 2, border_radius=20)
+        
+        screen.blit(self.font_title.render("TRANG BỊ & BALO", True, CYAN), (panel_rect.x + 40, panel_rect.y + 20))
+        
+        # Weapons list
+        y = panel_rect.y + 100
+        for i, w in enumerate(self.weapon_manager.weapons):
+            item_rect = pygame.Rect(panel_rect.x + 40, y, panel_rect.width - 80, 70)
+            pygame.draw.rect(screen, CARD, item_rect, border_radius=12)
+            
+            # Weapon Image
+            try:
+                img = pygame.image.load(w.image_path).convert_alpha()
+                img = pygame.transform.scale(img, (48, 48))
+                screen.blit(img, (item_rect.x + 12, item_rect.y + 11))
+            except: pass
+            
+            # Text
+            name_txt = self.font_big.render(w.name, True, WHITE)
+            screen.blit(name_txt, (item_rect.x + 80, item_rect.y + 10))
+            
+            ammo_txt = f"Đạn: {w.ammo_in_mag}/{w.reserve_ammo}" if not getattr(w, "melee", False) else "Vô hạn"
+            screen.blit(self.font_small.render(ammo_txt, True, SOFT), (item_rect.x + 80, item_rect.y + 40))
+            
+            # Drop Button
+            drop_btn = pygame.Rect(item_rect.right - 120, item_rect.y + 15, 100, 40)
+            pygame.draw.rect(screen, (200, 60, 60), drop_btn, border_radius=8)
+            screen.blit(self.font.render("VỨT", True, WHITE), (drop_btn.x + 25, drop_btn.y + 8))
+            
+            y += 85
+
+    def handle_backpack_click(self, mx, my):
+        panel_rect = pygame.Rect(200, 100, SCREEN_WIDTH - 400, SCREEN_HEIGHT - 200)
+        y = panel_rect.y + 100
+        for i, w in enumerate(list(self.weapon_manager.weapons)):
+            item_rect = pygame.Rect(panel_rect.x + 40, y, panel_rect.width - 80, 70)
+            drop_btn = pygame.Rect(item_rect.right - 120, item_rect.y + 15, 100, 40)
+            
+            if drop_btn.collidepoint(mx, my):
+                if len(self.weapon_manager.weapons) > 1:
+                    self.weapon_manager.weapons.remove(w)
+                    if self.weapon_manager.current_weapon == w:
+                        self.weapon_manager.current_weapon = self.weapon_manager.weapons[0]
+                    self.popup = f"Đã vứt: {w.name}"
+                    self.popup_timer = pygame.time.get_ticks() + 1500
+                    play_sound_effect("sfx_item_drop")
+                else:
+                    self.popup = "Không thể vứt vũ khí cuối cùng!"
+                    self.popup_timer = pygame.time.get_ticks() + 1500
+                return
+            y += 85
+
     def draw(self):
         screen.fill(BLACK)
         if self.state == "menu":
@@ -3202,6 +3267,8 @@ class Game:
             self.draw_overlays()
             if self.show_shop:
                 self.draw_shop()
+            if self.show_backpack:
+                self.draw_backpack()
             if self.state == "pause":
                 self.draw_pause()
         elif self.state in ["win", "lose"]:
@@ -3297,6 +3364,9 @@ class Game:
                     self.weapon_manager.reload()
                 elif event.key == pygame.K_e:
                     self.interact()
+                elif event.key == pygame.K_b:
+                    if not self.show_shop:
+                        self.show_backpack = not self.show_backpack
                 
                 # Skills selection
                 elif event.key == pygame.K_4:
@@ -3328,9 +3398,13 @@ class Game:
 
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             self.mouse_down = True
-            if self.state == "playing" and self.show_shop:
-                mx, my = pygame.mouse.get_pos()
-                self.handle_shop_click(mx, my)
+            if self.state == "playing":
+                if self.show_shop:
+                    mx, my = pygame.mouse.get_pos()
+                    self.handle_shop_click(mx, my)
+                elif self.show_backpack:
+                    mx, my = pygame.mouse.get_pos()
+                    self.handle_backpack_click(mx, my)
             if self.state == "pause":
                 mx, my = pygame.mouse.get_pos()
                 btns = getattr(self, "pause_buttons", {}) or {}
