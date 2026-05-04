@@ -172,8 +172,6 @@ class Weapon:
             self.image = pygame.Surface((32, 32))
             self.image.fill((100, 100, 100))
         self.rotated_image = self.image
-        self._rotated_cache = {}  # angle_deg -> surface
-        self._last_rotated_deg = None
     
     def update_position(self, player_x, player_y, target_x, target_y):
         # Calculate angle to target
@@ -185,13 +183,11 @@ class Weapon:
         self.x = player_x + math.cos(self.angle) * self.offset
         self.y = player_y + math.sin(self.angle) * self.offset
         
-        # Rotate weapon image (cached)
-        deg = int(-math.degrees(self.angle))
-        if deg != self._last_rotated_deg:
-            self._last_rotated_deg = deg
-            if deg not in self._rotated_cache:
-                self._rotated_cache[deg] = pygame.transform.rotate(self.image, deg)
-            self.rotated_image = self._rotated_cache[deg]
+        # Rotate weapon image
+        self.rotated_image = pygame.transform.rotate(
+            self.image, 
+            -math.degrees(self.angle) - 0
+        )
         
     def move_with_player(self, player_x, player_y):
         # Keep weapon at current angle but update position with player
@@ -308,42 +304,11 @@ class Weapon:
         return False
     
     def update_bullets(self, enemies, blocked_tiles=None):
-        CELL = 64
-        
-        def enemy_hitbox_rect(enemy):
-            try:
-                frame = enemy.frames[enemy.current_action][enemy.current_frame]
-                fw, fh = frame.get_size()
-                hit_w = max(28, int(fw * 0.45))
-                hit_h = max(28, int(fh * 0.45))
-            except Exception:
-                hit_w = hit_h = 60
-            rect = pygame.Rect(0, 0, hit_w, hit_h)
-            rect.center = (int(enemy.x), int(enemy.y))
-            return rect
-
-        grid = {}
-        for enemy in enemies:
-            if not enemy.is_dead:
-                cx, cy = int(enemy.x // CELL), int(enemy.y // CELL)
-                cell = (cx, cy)
-                if cell not in grid:
-                    grid[cell] = []
-                grid[cell].append(enemy)
-        
-        def enemies_near(bx, by):
-            cx, cy = int(bx // CELL), int(by // CELL)
-            for dx in (-1, 0, 1):
-                for dy in (-1, 0, 1):
-                    key = (cx + dx, cy + dy)
-                    if key in grid:
-                        for e in grid[key]:
-                            yield e
-
         bullets_to_remove = []
         for bullet in self.bullets:
             bullet.update()
             
+            # Wall Collision
             if blocked_tiles:
                 tx, ty = int(bullet.x // 16), int(bullet.y // 16)
                 if (tx, ty) in blocked_tiles:
@@ -353,30 +318,35 @@ class Weapon:
                     bullets_to_remove.append(bullet)
                     continue
 
-            for enemy in enemies_near(bullet.x, bullet.y):
-                enemy_rect = enemy_hitbox_rect(enemy)
-                
-                if bullet.melee:
-                    bullet_rect = pygame.Rect(bullet.x - 50, bullet.y - 50, 100, 100)
-                else:
-                    bullet_rect = pygame.Rect(bullet.x - 4, bullet.y - 4, 8, 8)
-                
-                if not bullet.exploded and bullet_rect.colliderect(enemy_rect):
-                    if bullet.radius > 0:
-                        bullet.explode()
-                        self._apply_explosion(bullet, enemies)
-                    else:
-                        enemy.take_damage(bullet.damage)
+            # Check collision with enemies
+            for enemy in enemies:
+                if not enemy.is_dead:
+                    enemy_rect = pygame.Rect(enemy.x - 30, enemy.y - 30, 60, 60)
                     
-                    if not bullet.melee:
-                        bullets_to_remove.append(bullet)
-                        break
+                    if bullet.melee:
+                        # Melee has larger hit area
+                        bullet_rect = pygame.Rect(bullet.x - 50, bullet.y - 50, 100, 100)
+                    else:
+                        bullet_rect = pygame.Rect(bullet.x - 4, bullet.y - 4, 8, 8)
+                    
+                    if not bullet.exploded and bullet_rect.colliderect(enemy_rect):
+                        if bullet.radius > 0:
+                            bullet.explode()
+                            self._apply_explosion(bullet, enemies)
+                        else:
+                            enemy.take_damage(bullet.damage)
+                        
+                        if not bullet.melee: # Bullets are consumed, melee slashes stay for duration
+                            bullets_to_remove.append(bullet)
+                            break
             
+            # Remove bullets that are far away or exploded
             if bullet.timer <= 0:
                 bullets_to_remove.append(bullet)
             if bullet.exploded and bullet.explosion_timer <= 0:
                 bullets_to_remove.append(bullet)
         
+        # Remove used bullets
         for bullet in bullets_to_remove:
             if bullet in self.bullets:
                 self.bullets.remove(bullet)

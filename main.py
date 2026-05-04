@@ -55,12 +55,13 @@ pygame.display.set_caption("Last Roof: Escape City")
 clock = pygame.time.Clock()
 
 from enemy import FlyingEye, Goblin, Mushroom, Skeleton, BigFlyingEye, DashingGoblin, TeleportingMushroom, EvilWizard, OldGuardian
-from pathfinding import a_star, bfs, dfs, greedy_safe
+from pathfinding import bfs
 from player import Player
 from weapon import WeaponManager
 from all_graphics import ALL_GRAPHICS
 from camera import Camera
 from ui import load_ui_font, wrap_text, safe_load, safe_sheet_frame
+from entities.pet import Pet, PETS_DATA
 
 # --- Map props loaded HERE after display is initialized ---
 from map_props import CHAPTER_TILES, DESERT_TILE, DESERT_TILE_ALT, DESERT_WALL, DESERT_GRASS, DESERT_GRASS_TUFT, DESERT_HUT, DESERT_BIG_GRASS, DESERT_BIG_ROCK, obstacle_prop_for_tile, draw_prop
@@ -112,6 +113,10 @@ CARD_WEAPON_TAESAR = safe_load("Shop_Cards/Card_Weapon_Taesar_Gun.png", (72, 96)
 CARD_BORDER = safe_load("Shop_Cards/Card_Border_1.png", (78, 102))
 CARD_PET_BIRD = safe_load("Shop_Cards/Card_Pet_BlueBird.png", (58, 78))
 CARD_PET_FOX = safe_load("Shop_Cards/Card_Pet_Fox.png", (58, 78))
+CARD_PET_EAGLE = safe_load("Shop_Cards/Card_Pet_Eagle.png", (58, 78))
+CARD_PET_GRAY_CAT = safe_load("Shop_Cards/Card_Pet_GrayCat.png", (58, 78))
+CARD_PET_ORANGE_CAT = safe_load("Shop_Cards/Card_Pet_OrangeCat.png", (58, 78))
+CARD_PET_RACOON = safe_load("Shop_Cards/Card_Pet_Racoon.png", (58, 78))
 CARD_BUILD_MORTAR = safe_load("Shop_Cards/Card_Building_SuperMortar.png", (58, 78))
 CARD_BUILD_CANNON = safe_load("Shop_Cards/Card_Building_SuperCannon.png", (58, 78))
 PET_BIRD = safe_load("Sprites/Sprites_Pet/PET_BlueBird.png", (34, 34))
@@ -478,7 +483,7 @@ class Game:
                 play_sound_effect(f"sfx_reload_{wtype}")
         self.weapon_manager.on_event = _weapon_event
         self.story_flags = set()
-        self.last_hint_path = []
+        self.exit_path = []
         self.last_spawn_at = 0
         self.shot_counter = 0
         self.frenzy_window_until = 0
@@ -518,8 +523,15 @@ class Game:
         ))
         
         # --- Pets & Loadout ---
-        self.current_pet = PET_BIRD
-        self.unlocked_pets = [PET_BIRD]
+        self.all_pets = {}
+        for pdata in PETS_DATA:
+            pet = Pet(pdata["name"], pdata["path"], pdata["attr"], pdata["desc"])
+            self.all_pets[pdata["id"]] = pet
+        
+        self.unlocked_pets = ["blue_bird"] # Only start with Blue Bird
+        self.current_pet_id = "blue_bird"
+        self.current_pet_instance = self.all_pets["blue_bird"]
+        self.apply_pet_effects()
         
         # --- Infinite Map ---
         self.chunks = {} # (cx, cy) -> list of objects
@@ -530,18 +542,16 @@ class Game:
         self.show_help = False
         self.show_shop = False
         self.show_map = False
-        # Temporary testing mode: force map background to black for readability/debugging.
-        self.force_black_map_background = True
         self.map_assets = [None] + self.discover_map_backgrounds()
         self.selected_map_index = 0
-        self.selected_map_name = "Black Background" if self.force_black_map_background else "Default Tilemap"
+        self.selected_map_name = "Default Tilemap"
         self.map_background_path = None
         self.map_background_surface = None
         self.map_world_surface = None
         self.map_surface_cache = {}
         self.set_map_background_by_index(0)
-        self.hint_mode_index = 0
-        self.hint_modes = ["BFS", "DFS", "SAFE", "A*"]
+        self.exit_path = []
+        self.exit_path_timer = 0
         
         self.popup = ""
         self.popup_timer = 0
@@ -649,14 +659,6 @@ class Game:
         return image.subsurface(pygame.Rect(x1, y1, x2 - x1, y2 - y1)).copy()
 
     def set_map_background_by_index(self, index):
-        if getattr(self, "force_black_map_background", False):
-            self.selected_map_index = 0
-            self.selected_map_name = "Black Background"
-            self.map_background_path = None
-            self.map_background_surface = None
-            self.map_world_surface = None
-            return
-
         if not self.map_assets:
             self.selected_map_index = 0
             self.selected_map_name = "Default Tilemap"
@@ -1220,7 +1222,7 @@ class Game:
         self.dialog_lines = []
         self.dialog_queue = []
         self.show_map = False
-        self.hint_mode_index = 0
+        self.exit_path = []
         self.next_chapter_ready = False
         self.exit_unlocked = False
         self.yard_spawned = False
@@ -1228,7 +1230,6 @@ class Game:
         self.yard_gate_tile = (26, 22)
         self.last_objective_text = self.objective_label() if self.chapter else ""
         self.objective_flash_until = pygame.time.get_ticks() + 1800
-        self.last_hint_path = []
         self.beacon_started_at = 0
         self.holdout_until = 0
         self.mouse_down = False
@@ -1343,10 +1344,10 @@ class Game:
     def item_at_player(self):
         for item in self.chapter.items:
             # Money is auto-picked up; never require E
-            if item.item_type == "money":
-                continue
             if not item.collected:
-                if self.player_can_pick_item(item, inflate=INTERACT_RADIUS):
+                ix = item.grid_pos[0] * TILE_SIZE + TILE_SIZE // 2
+                iy = item.grid_pos[1] * TILE_SIZE + TILE_SIZE // 2
+                if math.hypot(ix - self.player.x, iy - self.player.y) <= INTERACT_RADIUS:
                     return item
         return None
 
@@ -1494,6 +1495,7 @@ class Game:
 
     def collect_item(self, item):
         item.collected = True
+        play_sound_effect("sfx_item_drop")
         self.popup = item.description
         self.popup_timer = pygame.time.get_ticks() + 2600
         if item.item_type == "weapon":
@@ -1608,8 +1610,11 @@ class Game:
         elif item.item_type == "flare":
             self.popup = "Phao sang da san sang cho diem ha canh."
         elif item.item_type == "money":
-            self.money += max(1, int(item.amount or 1))
-            self.popup = f"+{max(1, int(item.amount or 1))} tien"
+            amount = max(1, int(item.amount or 1))
+            if hasattr(self.player, "money_mult"):
+                amount = int(amount * self.player.money_mult)
+            self.money += amount
+            self.popup = f"+{amount} tien"
             self.popup_timer = pygame.time.get_ticks() + 1200
 
     def remove_gate_collision(self, gate_tile):
@@ -1706,8 +1711,14 @@ class Game:
 
             keys = pygame.key.get_pressed()
             self.player.update(keys, self.current_blocked, None, None, TILE_SIZE)
+            if self.current_pet_instance:
+                self.current_pet_instance.update(self.player.x, self.player.y, self.player.direction, 16.6) # approx 60fps dt
             self.player.x = max(TILE_SIZE, min(self.player.x, self.world_w - TILE_SIZE))
             self.player.y = max(TILE_SIZE, min(self.player.y, self.world_h - TILE_SIZE))
+
+            # Regen logic from pet
+            if getattr(self.player, "regen", 0) > 0:
+                self.player.health = min(self.player.max_health, self.player.health + self.player.regen)
 
             # Auto-pickup money on contact
             for it in self.chapter.items:
@@ -1715,10 +1726,12 @@ class Game:
                     continue
                 if it.item_type != "money":
                     continue
-                # Use hitbox overlap instead of center-distance so walking across the coin always picks it up.
-                if self.player_can_pick_item(it, inflate=12):
+                # Auto-pickup radius (pixel based for smoother feel)
+                ix = it.grid_pos[0] * TILE_SIZE + TILE_SIZE // 2
+                iy = it.grid_pos[1] * TILE_SIZE + TILE_SIZE // 2
+                dist = math.hypot(ix - self.player.x, iy - self.player.y)
+                if dist <= INTERACT_RADIUS * 0.7:
                     self.collect_item(it)
-                    play_sound_effect("sfx_item_drop")
             
             self.camera.update(self.player.x, self.player.y, self.world_w, self.world_h)
             
@@ -1740,14 +1753,21 @@ class Game:
                 world_my,
                 self.mouse_down and mx < SCREEN_WIDTH - SIDEBAR_WIDTH,
                 [entry.enemy for entry in self.story_enemies],
-                self.current_blocked
+                self.current_blocked,
+                fire_rate_mult=getattr(self.player, "fire_rate_mult", 1.0),
+                damage_mult=getattr(self.player, "damage_mult", 1.0)
             )
+
+            # Update exit path every 60 frames (1s) to save performance
+            self.exit_path_timer -= 1
+            if self.exit_path_timer <= 0:
+                self.update_exit_path()
+                self.exit_path_timer = 60
             
             self.skill_manager.update([entry.enemy for entry in self.story_enemies], self.current_blocked)
             self.update_particles()
             self.handle_progression()
             self.check_auto_transition()
-            self.update_hint_path()
 
             # Player hit SFX (throttled)
             now = pygame.time.get_ticks()
@@ -1830,8 +1850,8 @@ class Game:
 
             enemy.obstacle_map = self.build_obstacle_grid()
             enemy.update(self.player)
-            enemy.x = max(TILE_SIZE, min(enemy.x, MAP_WIDTH - TILE_SIZE))
-            enemy.y = max(TILE_SIZE, min(enemy.y, MAP_HEIGHT - TILE_SIZE))
+            enemy.x = max(TILE_SIZE, min(enemy.x, self.world_w - TILE_SIZE))
+            enemy.y = max(TILE_SIZE, min(enemy.y, self.world_h - TILE_SIZE))
             if enemy.is_dead and not entry.dead_registered:
                 entry.dead_registered = True
                 play_sound_effect("sfx_enemy_death")
@@ -2174,70 +2194,38 @@ class Game:
             return "Kích hoạt beacon"
         return "Ra điểm trực thăng"
 
-    def auto_select_hint_mode(self):
-        cid = self.chapter.id
-        if cid == "roof":
-            self.hint_mode_index = 0
-            return
-        if cid == "office":
-            if not self.mission.data["keycard_collected"] or not self.mission.data["npc_saved"]:
-                self.hint_mode_index = 1
-            else:
-                self.hint_mode_index = 0
-            return
-        if cid == "medical":
-            if not self.mission.data["gate_opened"]:
-                self.hint_mode_index = 2
-            else:
-                self.hint_mode_index = 3
-            return
-        self.hint_mode_index = 3 if self.mission.data["signal_started"] else 2
-
-    def unexplored_goals(self):
-        goals = set()
-        for item in self.chapter.items:
-            if not item.collected:
-                goals.add(item.grid_pos)
-        for npc in self.chapter.npcs:
-            if not npc.interacted:
-                goals.add(npc.grid_pos)
-        if self.chapter.exit_pos:
-            goals.add(self.chapter.exit_pos)
-        return goals
-
-    def update_hint_path(self):
-        self.auto_select_hint_mode()
+    def update_exit_path(self):
+        """Update the BFS path to the current objective or exit portal."""
         current_objective = self.objective_label()
         if current_objective != self.last_objective_text:
             self.last_objective_text = current_objective
             self.objective_flash_until = pygame.time.get_ticks() + 1800
+        
         start = self.current_tile()
         goal = self.objective_tile()
-        danger = self.build_danger_map()
         blocked = self.current_blocked
-        mode = self.hint_modes[self.hint_mode_index]
-        if mode == "BFS":
-            self.last_hint_path = bfs(start, goal, GRID_SIZE, GRID_SIZE, blocked)
-        elif mode == "DFS":
-            self.last_hint_path = dfs(start, self.unexplored_goals(), GRID_SIZE, GRID_SIZE, blocked)
-        elif mode == "SAFE":
-            self.last_hint_path = greedy_safe(start, goal, GRID_SIZE, GRID_SIZE, blocked, danger)
-        else:
-            self.last_hint_path = a_star(start, goal, GRID_SIZE, GRID_SIZE, blocked, danger)
+        
+        if start and goal:
+            self.exit_path = bfs(start, goal, GRID_SIZE, GRID_SIZE, blocked)
 
     def draw_path_overlay(self, surface):
-        if not self.last_hint_path: return
-        mode = self.hint_modes[self.hint_mode_index]
-        color = CYAN if mode == "A*" else GREEN if mode == "BFS" else RED if mode == "DFS" else YELLOW
+        """Draw the BFS path for the player."""
+        if not self.exit_path or len(self.exit_path) < 2: 
+            return
+            
+        # Bright Cyan/Green that glows in the dark
+        color = (0, 255, 255) 
         points = []
-        for x, y in self.last_hint_path:
+        for x, y in self.exit_path:
             sx, sy = self.camera.world_to_screen(x * TILE_SIZE + 8, y * TILE_SIZE + 8)
             points.append((sx, sy))
+            
         if len(points) > 1:
-            pygame.draw.lines(surface, color, False, points, 3)
-            # Draw node pulses for clarity
+            # Draw a thicker glowing line
+            pygame.draw.lines(surface, color, False, points, 4)
+            # Draw start and end markers
             for i, p in enumerate(points):
-                if i % 3 == 0:
+                if i % 4 == 0:
                     pygame.draw.circle(surface, color, p, 3)
 
     def draw(self):
@@ -2261,12 +2249,15 @@ class Game:
     def draw_world(self):
         # We don't use a separate world_surface for infinite map because it's too large
         self.render_world(screen)
-        self.draw_path_overlay(screen)
         # Vẽ hiệu ứng kỹ năng
         self.skill_manager.draw(screen, self.camera)
 
         # Darkness overlay (power-out ambience)
         self.draw_darkness(screen)
+
+        # DRAW PATH ON TOP OF DARKNESS so it glows
+        self.draw_path_overlay(screen)
+
         # HUD mission always visible
         self.draw_mission_hud(screen)
 
@@ -2346,9 +2337,7 @@ class Game:
         for ty in range(min_ty, max_ty + 1):
             for tx in range(min_tx, max_tx + 1):
                 sx, sy = self.camera.world_to_screen(tx * TILE_SIZE, ty * TILE_SIZE)
-                if self.force_black_map_background:
-                    pygame.draw.rect(surface, BLACK, (sx, sy, TILE_SIZE, TILE_SIZE))
-                elif custom_map_active:
+                if custom_map_active:
                     src_rect = pygame.Rect(tx * TILE_SIZE, ty * TILE_SIZE, TILE_SIZE, TILE_SIZE)
                     surface.blit(self.map_world_surface, (sx, sy), src_rect)
                 else:
@@ -2480,17 +2469,41 @@ class Game:
         pass
 
     def draw_pet_companion(self, surface):
-        now = pygame.time.get_ticks()
-        orbit_x = self.player.x - 34 + math.sin(now * 0.004) * 18
-        orbit_y = self.player.y + 22 + math.cos(now * 0.003) * 12
-        sx, sy = self.camera.world_to_screen(orbit_x, orbit_y)
-        surface.blit(self.current_pet, self.current_pet.get_rect(center=(sx, sy)))
-        # Enhanced orbital effect
-        for i in range(3):
-            ang = now * 0.005 + i * 2.09
-            px = sx + math.cos(ang) * 15
-            py = sy + math.sin(ang) * 15
-            pygame.draw.circle(screen, (200, 220, 255, 100), (int(px), int(py)), 3)
+        if self.current_pet_instance:
+            self.current_pet_instance.draw(surface, self.camera)
+
+    def apply_pet_effects(self):
+        """Apply current pet's attributes to player and game stats."""
+        # Reset defaults (assuming base values)
+        self.player.speed = 5
+        self.player.max_health = 300
+        # self.player.health = min(self.player.health, self.player.max_health)
+        
+        if not self.current_pet_instance:
+            return
+            
+        attr = self.current_pet_instance.attributes
+        
+        # Apply Speed
+        if "speed_mult" in attr:
+            self.player.speed *= attr["speed_mult"]
+            
+        # Apply Health
+        if "max_health_add" in attr:
+            self.player.max_health += attr["max_health_add"]
+            self.player.health = min(self.player.health + attr["max_health_add"], self.player.max_health)
+            
+        # Armor add (initial)
+        if "armor_add" in attr and getattr(self, "stats_start", 0) > pygame.time.get_ticks() - 1000:
+            self.player.armor = max(self.player.armor, attr["armor_add"])
+
+        # Other effects like damage_mult, fire_rate_mult, etc.
+        # These need to be handled where damage/fire rate is calculated.
+        # We can store them in player or weapon manager.
+        self.player.damage_mult = attr.get("damage_mult", 1.0)
+        self.player.fire_rate_mult = attr.get("fire_rate_mult", 1.0)
+        self.player.money_mult = attr.get("money_mult", 1.0)
+        self.player.regen = attr.get("regen", 0.0)
 
     def draw_chapter_backdrop(self, surface):
         if self.force_black_map_background:
@@ -2612,8 +2625,8 @@ class Game:
             if not entry.enemy.is_dead:
                 ex, ey = entry.tile()
                 pygame.draw.circle(screen, RED, (int(rect.x + ex * sx), int(rect.y + ey * sy)), 2)
-        if self.last_hint_path:
-            for tile in self.last_hint_path:
+        if self.exit_path:
+            for tile in self.exit_path:
                 pygame.draw.rect(screen, YELLOW, (rect.x + tile[0] * sx, rect.y + tile[1] * sy, max(1, sx), max(1, sy)), 1)
         px, py = self.current_tile()
         pygame.draw.circle(screen, WHITE, (int(rect.x + px * sx), int(rect.y + py * sy)), 3)
@@ -2771,7 +2784,7 @@ class Game:
                 pygame.draw.rect(screen, item.color, (rect.x + item.grid_pos[0] * scale, rect.y + item.grid_pos[1] * scale, scale, scale))
         for npc in self.chapter.npcs:
             pygame.draw.circle(screen, CYAN, (int(rect.x + npc.grid_pos[0] * scale), int(rect.y + npc.grid_pos[1] * scale)), 4)
-        for tile in self.last_hint_path:
+        for tile in self.exit_path:
             pygame.draw.rect(screen, YELLOW, (rect.x + tile[0] * scale, rect.y + tile[1] * scale, scale, scale), 1)
         px, py = self.current_tile()
         pygame.draw.circle(screen, WHITE, (int(rect.x + px * scale), int(rect.y + py * scale)), 5)
@@ -3024,6 +3037,7 @@ class Game:
         y = info_rect.y + 40
         lines = [
             f"Kills: {self.kill_count}", f"Saved: {self.saved_npcs}",
+            f"Money: {self.money}",
             "B: Open Shop", "TAB: Path Mode", "M: Full Map"
         ]
         for line in lines:
@@ -3054,6 +3068,12 @@ class Game:
             ("weapon_grenadelauncher", "GrenadeLauncher", "Buy 1 GrenadeLauncher"),
             ("weapon_poisongun", "PoisonGun", "Buy 1 PoisonGun"),
             ("weapon_taesar", "Taesar Gun", "Buy 1 Taesar"),
+            ("pet_blue_bird", "Blue Bird", "Pet: +15% Tốc độ"),
+            ("pet_cat_gray", "Gray Cat", "Pet: +50 HP & Regen"),
+            ("pet_cat_orange", "Orange Cat", "Pet: +20% Damage"),
+            ("pet_eagle", "Eagle", "Pet: +15% Fire Rate"),
+            ("pet_fox", "Fox", "Pet: +25 Giáp"),
+            ("pet_racoon", "Racoon", "Pet: +50% Tiền"),
         ]
         weapon_cards = {
             "weapon_pistol": CARD_WEAPON_PISTOL,
@@ -3062,6 +3082,12 @@ class Game:
             "weapon_grenadelauncher": CARD_WEAPON_GRENADE,
             "weapon_poisongun": CARD_WEAPON_POISON,
             "weapon_taesar": CARD_WEAPON_TAESAR,
+            "pet_blue_bird": CARD_PET_BIRD,
+            "pet_cat_gray": CARD_PET_GRAY_CAT,
+            "pet_cat_orange": CARD_PET_ORANGE_CAT,
+            "pet_eagle": CARD_PET_EAGLE,
+            "pet_fox": CARD_PET_FOX,
+            "pet_racoon": CARD_PET_RACOON,
         }
         for i, (sid, title, desc) in enumerate(self.shop_items):
             r, c = i // 3, i % 3
@@ -3121,7 +3147,18 @@ class Game:
                         candidates = WEAPON_DROP_POOL
                     data = dict(random.choice(candidates))
                     self.unlock_weapon(data, equip_now=True)
-                self.popup = f"Đã mua: {title}"
+                elif sid.startswith("pet_"):
+                    pet_id = sid.replace("pet_", "")
+                    if pet_id not in self.unlocked_pets:
+                        self.unlocked_pets.append(pet_id)
+                        self.popup = f"Đã mua Pet: {title}"
+                    else:
+                        self.popup = f"Đã trang bị Pet: {title}"
+                    
+                    self.current_pet_id = pet_id
+                    self.current_pet_instance = self.all_pets[pet_id]
+                    self.apply_pet_effects()
+                
                 self.popup_timer = pygame.time.get_ticks() + 1400
                 play_sound_effect("sfx_item_drop")
                 return

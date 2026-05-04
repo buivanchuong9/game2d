@@ -44,21 +44,19 @@ SCREEN_WIDTH = 1200
 SCREEN_HEIGHT = 800
 MAP_WIDTH = SCREEN_WIDTH - SIDEBAR_WIDTH
 MAP_HEIGHT = SCREEN_HEIGHT
-# Fullscreen by default; test harness can force windowed mode via env.
-display_flags = pygame.SCALED
-if _os.environ.get("LASTROOF_WINDOWED", "0") != "1":
-    display_flags |= pygame.FULLSCREEN
-screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), display_flags)
+# Fullscreen + scaled rendering (keeps internal resolution stable)
+screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SCALED | pygame.FULLSCREEN)
 pygame.display.set_caption("Last Roof: Escape City")
 clock = pygame.time.Clock()
 
 from entities.enemy import FlyingEye, Goblin, Mushroom, Skeleton, BigFlyingEye, DashingGoblin, TeleportingMushroom, EvilWizard, OldGuardian
-from systems.pathfinding import a_star, bfs, dfs, greedy_safe
+from systems.pathfinding import bfs
 from entities.player import Player
 from combat.weapon import WeaponManager
 from content.all_graphics import ALL_GRAPHICS
 from systems.camera import Camera
 from systems.ui import load_ui_font, wrap_text, safe_load, safe_sheet_frame
+from entities.pet import Pet, PETS_DATA
 
 # --- Map props loaded HERE after display is initialized ---
 from world.map_props import CHAPTER_TILES, DESERT_TILE, DESERT_TILE_ALT, DESERT_WALL, DESERT_GRASS, DESERT_GRASS_TUFT, DESERT_HUT, DESERT_BIG_GRASS, DESERT_BIG_ROCK, obstacle_prop_for_tile, draw_prop
@@ -112,9 +110,10 @@ CARD_PET_BIRD = safe_load("Shop_Cards/Card_Pet_BlueBird.png", (58, 78))
 CARD_PET_FOX = safe_load("Shop_Cards/Card_Pet_Fox.png", (58, 78))
 CARD_BUILD_MORTAR = safe_load("Shop_Cards/Card_Building_SuperMortar.png", (58, 78))
 CARD_BUILD_CANNON = safe_load("Shop_Cards/Card_Building_SuperCannon.png", (58, 78))
-PET_BIRD = safe_load("Sprites/Sprites_Pet/PET_BlueBird.png", (34, 34))
-PET_FOX = safe_load("Sprites/Sprites_Pet/PET_Fox.png", (34, 34))
-PET_RACOON = safe_load("Sprites/Sprites_Pet/PET_Racoon.png", (34, 34))
+CARD_PET_EAGLE = safe_load("Shop_Cards/Card_Pet_Eagle.png", (58, 78))
+CARD_PET_GRAY_CAT = safe_load("Shop_Cards/Card_Pet_GrayCat.png", (58, 78))
+CARD_PET_ORANGE_CAT = safe_load("Shop_Cards/Card_Pet_OrangeCat.png", (58, 78))
+CARD_PET_RACOON = safe_load("Shop_Cards/Card_Pet_Racoon.png", (58, 78))
 BUILD_CANNON = safe_load("Sprites/Sprites_Building/SuperCannon.png", (52, 52))
 BUILD_MORTAR = safe_load("Sprites/Sprites_Building/SuperMortar.png", (52, 52))
 BUILD_ROCKET = safe_load("Sprites/Sprites_Building/RocketLauncher.png", (52, 52))
@@ -476,7 +475,7 @@ class Game:
                 play_sound_effect(f"sfx_reload_{wtype}")
         self.weapon_manager.on_event = _weapon_event
         self.story_flags = set()
-        self.last_hint_path = []
+        self.exit_path = []
         self.last_spawn_at = 0
         self.shot_counter = 0
         self.frenzy_window_until = 0
@@ -516,8 +515,15 @@ class Game:
         ))
         
         # --- Pets & Loadout ---
-        self.current_pet = PET_BIRD
-        self.unlocked_pets = [PET_BIRD]
+        self.all_pets = {}
+        for pdata in PETS_DATA:
+            pet = Pet(pdata["name"], pdata["path"], pdata["attr"], pdata["desc"])
+            self.all_pets[pdata["id"]] = pet
+        
+        self.unlocked_pets = ["blue_bird"]
+        self.current_pet_id = "blue_bird"
+        self.current_pet_instance = self.all_pets["blue_bird"]
+        self.apply_pet_effects()
         
         # --- Infinite Map ---
         self.chunks = {} # (cx, cy) -> list of objects
@@ -536,8 +542,8 @@ class Game:
         self.map_world_surface = None
         self.map_surface_cache = {}
         self.set_map_background_by_index(0)
-        self.hint_mode_index = 0
-        self.hint_modes = ["BFS", "DFS", "SAFE", "A*"]
+        self.exit_path = []
+        self.exit_path_timer = 0
         
         self.popup = ""
         self.popup_timer = 0
@@ -703,7 +709,7 @@ class Game:
         self.current_blocked = new_blocked
         # Update enemy pathfinding grids
         for entry in self.story_enemies:
-            entry.enemy.obstacle_map = self._cached_obstacle_set
+            entry.enemy.obstacle_map = self.build_obstacle_grid()
 
     def build_chapters(self):
         def ring_walls():
@@ -1239,7 +1245,7 @@ class Game:
         self.dialog_lines = []
         self.dialog_queue = []
         self.show_map = False
-        self.hint_mode_index = 0
+        self.exit_path = []
         self.next_chapter_ready = False
         self.exit_unlocked = False
         self.yard_spawned = False
@@ -1247,7 +1253,6 @@ class Game:
         self.yard_gate_tile = (26, 22)
         self.last_objective_text = self.objective_label() if self.chapter else ""
         self.objective_flash_until = pygame.time.get_ticks() + 1800
-        self.last_hint_path = []
         self.beacon_started_at = 0
         self.holdout_until = 0
         self.mouse_down = False
@@ -1256,9 +1261,6 @@ class Game:
         self.frenzy_window_until = 0
         self.last_spawn_at = pygame.time.get_ticks()
         self.tank = EscortTank(self.player.x - 70, self.player.y + 50)
-        self._cached_obstacle_set = set()
-        self._cached_tile_zoom = 1.0
-        self._cached_scaled_tiles = {}
 
         def is_yard_tile(tile: tuple[int, int]) -> bool:
             # Right/bottom quadrant: treated as outside yard in ground chapter
@@ -1283,11 +1285,11 @@ class Game:
                 enemy = enemy_cls(ex, ey)
                 enemy.health = archetype.get("health", 100)
                 enemy.max_health = archetype.get("health", 100)
-                enemy.obstacle_map = self._cached_obstacle_set
+                enemy.obstacle_map = self.build_obstacle_grid()
                 self.story_enemies.append(StoryEnemy(enemy, "boss", grid_pos))
             else:
                 enemy = enemy_cls(ex, ey)
-                enemy.obstacle_map = self._cached_obstacle_set
+                enemy.obstacle_map = self.build_obstacle_grid()
                 self.story_enemies.append(StoryEnemy(enemy, archetype, grid_pos))
 
         # Finite spawn budget for this chapter (bắn hết là hết)
@@ -1353,22 +1355,13 @@ class Game:
     def current_tile(self):
         return (int(self.player.x // TILE_SIZE), int(self.player.y // TILE_SIZE))
 
-    def item_pickup_rect(self, item, inflate=8):
-        rect = pygame.Rect(item.grid_pos[0] * TILE_SIZE, item.grid_pos[1] * TILE_SIZE, TILE_SIZE, TILE_SIZE)
-        if inflate:
-            rect = rect.inflate(inflate, inflate)
-        return rect
-
-    def player_can_pick_item(self, item, inflate=8):
-        return self.player.get_rect().colliderect(self.item_pickup_rect(item, inflate=inflate))
-
     def item_at_player(self):
         for item in self.chapter.items:
             # Money is auto-picked up; never require E
-            if item.item_type == "money":
-                continue
             if not item.collected:
-                if self.player_can_pick_item(item, inflate=INTERACT_RADIUS):
+                ix = item.grid_pos[0] * TILE_SIZE + TILE_SIZE // 2
+                iy = item.grid_pos[1] * TILE_SIZE + TILE_SIZE // 2
+                if math.hypot(ix - self.player.x, iy - self.player.y) <= INTERACT_RADIUS:
                     return item
         return None
 
@@ -1376,8 +1369,7 @@ class Game:
         for npc in self.chapter.npcs:
             nx = npc.grid_pos[0] * TILE_SIZE + TILE_SIZE // 2
             ny = npc.grid_pos[1] * TILE_SIZE + TILE_SIZE // 2
-            dx = nx - self.player.x; dy = ny - self.player.y
-            if dx * dx + dy * dy <= INTERACT_RADIUS * INTERACT_RADIUS:
+            if math.hypot(nx - self.player.x, ny - self.player.y) <= INTERACT_RADIUS:
                 return npc
         return None
 
@@ -1469,7 +1461,7 @@ class Game:
             )
         )
 
-    def spawn_mission_item_at(self, tile: tuple[int, int], item_type: str, name: str, description: str, color=YELLOW, amount=0):
+    def spawn_mission_item_at(self, tile: tuple[int, int], item_type: str, name: str, description: str, color=YELLOW):
         """Spawn a mission item on a walkable tile if free."""
         tx, ty = tile
         if not (1 <= tx < GRID_SIZE - 1 and 1 <= ty < GRID_SIZE - 1):
@@ -1479,7 +1471,7 @@ class Game:
         for it in self.chapter.items:
             if not it.collected and it.grid_pos == (tx, ty):
                 return False
-        self.chapter.items.append(ItemPickup((tx, ty), name, description, item_type, amount=amount, color=color))
+        self.chapter.items.append(ItemPickup((tx, ty), name, description, item_type, color=color))
         play_sound_effect("sfx_item_drop")
         return True
 
@@ -1496,27 +1488,9 @@ class Game:
                         return True
         return False
 
-    def spawn_money_drop_near(self, tile: tuple[int, int], amount: int = 1, radius: int = 2):
-        """Spawn money near the drop tile and keep it reachable even around walls/corpses."""
-        tx, ty = tile
-        for r in range(0, max(0, radius) + 1):
-            for dx in range(-r, r + 1):
-                for dy in range(-r, r + 1):
-                    if abs(dx) + abs(dy) != r:
-                        continue
-                    if self.spawn_mission_item_at(
-                        (tx + dx, ty + dy),
-                        "money",
-                        "Tien",
-                        "1 tien roi tu zombie.",
-                        color=YELLOW,
-                        amount=max(1, int(amount or 1)),
-                    ):
-                        return True
-        return False
-
     def collect_item(self, item):
         item.collected = True
+        play_sound_effect("sfx_item_drop")
         self.popup = item.description
         self.popup_timer = pygame.time.get_ticks() + 2600
         if item.item_type == "weapon":
@@ -1631,8 +1605,12 @@ class Game:
         elif item.item_type == "flare":
             self.popup = "Phao sang da san sang cho diem ha canh."
         elif item.item_type == "money":
-            self.money += max(1, int(item.amount or 1))
-            self.popup = f"+{max(1, int(item.amount or 1))} tien"
+            amount = max(1, int(item.amount or 1))
+            if hasattr(self.player, "money_mult"):
+                amount = int(amount * self.player.money_mult)
+            self.money += amount
+            self.popup = f"+{amount} tien"
+            self.popup_timer = pygame.time.get_ticks() + 1200
             self.popup_timer = pygame.time.get_ticks() + 1200
 
     def remove_gate_collision(self, gate_tile):
@@ -1643,7 +1621,7 @@ class Game:
             if pos in self.current_blocked:
                 self.current_blocked.remove(pos)
         for story_enemy in self.story_enemies:
-            story_enemy.enemy.obstacle_map = self._cached_obstacle_set
+            story_enemy.enemy.obstacle_map = self.build_obstacle_grid()
 
     def activate_box(self, tile):
         cid = self.chapter.id
@@ -1729,22 +1707,35 @@ class Game:
 
             keys = pygame.key.get_pressed()
             self.player.update(keys, self.current_blocked, None, None, TILE_SIZE)
+            if self.current_pet_instance:
+                self.current_pet_instance.update(self.player.x, self.player.y, self.player.direction, 16.6)
             # Restore strict boundaries
             self.player.x = max(TILE_SIZE, min(self.player.x, self.world_w - TILE_SIZE))
             self.player.y = max(TILE_SIZE, min(self.player.y, self.world_h - TILE_SIZE))
-
-            # Runtime trace found the actual game loop never auto-picked money in core/game.py.
-            for item in list(self.chapter.items):
-                if item.collected or item.item_type != "money":
+            
+            # Regen logic from pet
+            if getattr(self.player, "regen", 0) > 0:
+                self.player.health = min(self.player.max_health, self.player.health + self.player.regen)
+            
+            # Auto-pickup money on contact
+            player_rect = self.player.get_rect()
+            # Expand player pickup rect slightly for better "vàng" collection
+            pickup_rect = player_rect.inflate(20, 20)
+            for it in self.chapter.items:
+                if it.collected or it.item_type != "money":
                     continue
-                if self.player_can_pick_item(item, inflate=12):
-                    self.collect_item(item)
-                    play_sound_effect("sfx_item_drop")
+                
+                # Create a rect for the item
+                ix = it.grid_pos[0] * TILE_SIZE
+                iy = it.grid_pos[1] * TILE_SIZE
+                item_rect = pygame.Rect(ix, iy, TILE_SIZE, TILE_SIZE)
+                
+                if pickup_rect.colliderect(item_rect):
+                    self.collect_item(it)
             
             # Update camera to follow player and CLAMP to world edges (keeps map on screen)
             self.camera.update(self.player.x, self.player.y, world_w=self.world_w, world_h=self.world_h)
             
-            self._cached_obstacle_set = self.build_obstacle_grid()
             self.update_enemies()
             self.spawn_dynamic_enemies()
             self._trigger_clear_dialog_if_ready()
@@ -1763,14 +1754,21 @@ class Game:
                 world_my,
                 self.mouse_down and mx < SCREEN_WIDTH - SIDEBAR_WIDTH,
                 [entry.enemy for entry in self.story_enemies],
-                self.current_blocked
+                self.current_blocked,
+                fire_rate_mult=getattr(self.player, "fire_rate_mult", 1.0),
+                damage_mult=getattr(self.player, "damage_mult", 1.0)
             )
+
+            # Update exit path every 60 frames (1s) to save performance
+            self.exit_path_timer -= 1
+            if self.exit_path_timer <= 0:
+                self.update_exit_path()
+                self.exit_path_timer = 60
             
             self.skill_manager.update([entry.enemy for entry in self.story_enemies], self.current_blocked)
             self.update_particles()
             self.handle_progression()
             self.check_auto_transition()
-            self.update_hint_path()
 
             # Player hit SFX (throttled)
             now = pygame.time.get_ticks()
@@ -1828,7 +1826,7 @@ class Game:
         ex = tile[0] * TILE_SIZE + TILE_SIZE // 2
         ey = tile[1] * TILE_SIZE + TILE_SIZE // 2
         enemy = enemy_cls(ex, ey)
-        enemy.obstacle_map = self._cached_obstacle_set
+        enemy.obstacle_map = self.build_obstacle_grid()
         archetype = "basic"
         if enemy_cls in (DashingGoblin, FlyingEye):
             archetype = "fast"
@@ -1851,7 +1849,7 @@ class Game:
                 play_sound_effect("sfx_enemy_hit")
             entry._last_health = cur_hp
 
-            enemy.obstacle_map = self._cached_obstacle_set
+            enemy.obstacle_map = self.build_obstacle_grid()
             enemy.update(self.player)
             enemy.x = max(TILE_SIZE, min(enemy.x, MAP_WIDTH - TILE_SIZE))
             enemy.y = max(TILE_SIZE, min(enemy.y, MAP_HEIGHT - TILE_SIZE))
@@ -1863,9 +1861,9 @@ class Game:
                 # Stage progression hooks (linear missions)
                 if self.chapter.id == "roof" and self.mission.data.get("weapon_collected") and self.mission.data["zombies_killed"] >= 1:
                     self.mission.data["stage"] = max(int(self.mission.data.get("stage", 0) or 0), 2)
-                # Each kill drops 1 money; shift to a nearby free tile if the death tile is blocked.
+                # Each kill drops 1 money
                 etile = entry.tile()
-                self.spawn_money_drop_near(etile, amount=1, radius=2)
+                self.spawn_mission_item_near(etile, "money", "Tien", "1 tien roi tu zombie.", color=YELLOW, radius=2)
                 if entry.archetype in {"special", "tank"}:
                     self.mission.data["special_kills"] += 1
                 if entry.archetype == "boss":
@@ -2012,7 +2010,7 @@ class Game:
                 ex = grid_pos[0] * TILE_SIZE + TILE_SIZE // 2
                 ey = grid_pos[1] * TILE_SIZE + TILE_SIZE // 2
                 enemy = enemy_cls(ex, ey)
-                enemy.obstacle_map = self._cached_obstacle_set
+                enemy.obstacle_map = self.build_obstacle_grid()
                 arch = "boss" if isinstance(archetype, dict) and archetype.get("type") == "boss" else archetype
                 self.story_enemies.append(StoryEnemy(enemy, arch, grid_pos))
             self.popup = "Tiếng cổng sắt vang lên... Quái ngoài sân đã phát hiện bạn!"
@@ -2071,27 +2069,6 @@ class Game:
         pygame.draw.ellipse(shadow_surf, (0, 0, 0, 80), (0, 0, width, height))
         surface.blit(shadow_surf, (x - width // 2, y - height // 2))
 
-    def build_obstacle_grid(self):
-        """Trả về tập hợp các ô bị chặn trong bán kính gần người chơi để AI tìm đường hiệu quả."""
-        px, py = int(self.player.x // TILE_SIZE), int(self.player.y // TILE_SIZE)
-        radius = 40 
-        local_blocked = set()
-        for bx, by in self.current_blocked:
-            if abs(bx - px) <= radius and abs(by - py) <= radius:
-                local_blocked.add((bx, by))
-        return local_blocked
-
-    def build_danger_map(self):
-        danger_map = {}
-        for entry in self.story_enemies:
-            if entry.enemy.is_dead:
-                continue
-            ex, ey = entry.tile()
-            for x in range(max(0, ex - 4), min(GRID_SIZE, ex + 5)):
-                for y in range(max(0, ey - 4), min(GRID_SIZE, ey + 5)):
-                    dist = abs(ex - x) + abs(ey - y)
-                    danger_map[(x, y)] = danger_map.get((x, y), 0) + max(0, 6 - dist)
-        return danger_map
 
     def objective_tile(self):
         chapter_id = self.chapter.id
@@ -2197,70 +2174,38 @@ class Game:
             return "Kích hoạt beacon"
         return "Ra điểm trực thăng"
 
-    def auto_select_hint_mode(self):
-        cid = self.chapter.id
-        if cid == "roof":
-            self.hint_mode_index = 0
-            return
-        if cid == "office":
-            if not self.mission.data["keycard_collected"] or not self.mission.data["npc_saved"]:
-                self.hint_mode_index = 1
-            else:
-                self.hint_mode_index = 0
-            return
-        if cid == "medical":
-            if not self.mission.data["gate_opened"]:
-                self.hint_mode_index = 2
-            else:
-                self.hint_mode_index = 3
-            return
-        self.hint_mode_index = 3 if self.mission.data["signal_started"] else 2
-
-    def unexplored_goals(self):
-        goals = set()
-        for item in self.chapter.items:
-            if not item.collected:
-                goals.add(item.grid_pos)
-        for npc in self.chapter.npcs:
-            if not npc.interacted:
-                goals.add(npc.grid_pos)
-        if self.chapter.exit_pos:
-            goals.add(self.chapter.exit_pos)
-        return goals
-
-    def update_hint_path(self):
-        self.auto_select_hint_mode()
+    def update_exit_path(self):
+        """Update the BFS path to the current objective or exit portal."""
         current_objective = self.objective_label()
         if current_objective != self.last_objective_text:
             self.last_objective_text = current_objective
             self.objective_flash_until = pygame.time.get_ticks() + 1800
+        
         start = self.current_tile()
         goal = self.objective_tile()
-        danger = self.build_danger_map()
         blocked = self.current_blocked
-        mode = self.hint_modes[self.hint_mode_index]
-        if mode == "BFS":
-            self.last_hint_path = bfs(start, goal, GRID_SIZE, GRID_SIZE, blocked)
-        elif mode == "DFS":
-            self.last_hint_path = dfs(start, self.unexplored_goals(), GRID_SIZE, GRID_SIZE, blocked)
-        elif mode == "SAFE":
-            self.last_hint_path = greedy_safe(start, goal, GRID_SIZE, GRID_SIZE, blocked, danger)
-        else:
-            self.last_hint_path = a_star(start, goal, GRID_SIZE, GRID_SIZE, blocked, danger)
+        
+        if start and goal:
+            self.exit_path = bfs(start, goal, GRID_SIZE, GRID_SIZE, blocked)
 
     def draw_path_overlay(self, surface):
-        if not self.last_hint_path: return
-        mode = self.hint_modes[self.hint_mode_index]
-        color = CYAN if mode == "A*" else GREEN if mode == "BFS" else RED if mode == "DFS" else YELLOW
+        """Draw the BFS path for the player."""
+        if not self.exit_path or len(self.exit_path) < 2: 
+            return
+            
+        # Bright Cyan/Green that glows in the dark
+        color = (0, 255, 255) 
         points = []
-        for x, y in self.last_hint_path:
+        for x, y in self.exit_path:
             sx, sy = self.camera.world_to_screen(x * TILE_SIZE + 8, y * TILE_SIZE + 8)
             points.append((sx, sy))
+            
         if len(points) > 1:
-            pygame.draw.lines(surface, color, False, points, 3)
-            # Draw node pulses for clarity
+            # Draw a thicker glowing line
+            pygame.draw.lines(surface, color, False, points, 4)
+            # Draw start and end markers
             for i, p in enumerate(points):
-                if i % 3 == 0:
+                if i % 4 == 0:
                     pygame.draw.circle(surface, color, p, 3)
 
     def draw(self):
@@ -2284,12 +2229,15 @@ class Game:
     def draw_world(self):
         # We don't use a separate world_surface for infinite map because it's too large
         self.render_world(screen)
-        self.draw_path_overlay(screen)
         # Vẽ hiệu ứng kỹ năng
         self.skill_manager.draw(screen, self.camera)
 
         # Darkness overlay (power-out ambience)
         self.draw_darkness(screen)
+        
+        # DRAW PATH ON TOP OF DARKNESS so it glows
+        self.draw_path_overlay(screen)
+        
         # HUD mission always visible
         self.draw_mission_hud(screen)
 
@@ -2338,9 +2286,7 @@ class Game:
             elif (t // 180) % 9 == 0:
                 base_alpha = 160
 
-        if not hasattr(self, "_darkness_surf"):
-            self._darkness_surf = pygame.Surface((MAP_WIDTH, MAP_HEIGHT), pygame.SRCALPHA)
-        darkness = self._darkness_surf
+        darkness = pygame.Surface((MAP_WIDTH, MAP_HEIGHT), pygame.SRCALPHA)
         darkness.fill((0, 0, 0, base_alpha))
 
         # Light around player: "cut out" with gradient circles
@@ -2368,10 +2314,6 @@ class Game:
         else:
             base_1, base_2, wall_tile = current_tiles["floor1"], current_tiles["floor2"], current_tiles["wall"]
 
-        zoom = self.camera.zoom
-        if zoom != self._cached_tile_zoom:
-            self._cached_scaled_tiles.clear()
-            self._cached_tile_zoom = zoom
         for ty in range(max(0, min_ty), min(GRID_SIZE, max_ty + 1)):
             for tx in range(max(0, min_tx), min(GRID_SIZE, max_tx + 1)):
                 sx, sy = self.camera.world_to_screen(tx * TILE_SIZE, ty * TILE_SIZE)
@@ -2387,12 +2329,7 @@ class Game:
                     base_tile = base_2 if (tx * 3 + ty * 5) % 11 == 0 else base_1
                     if self.camera.zoom != 1.0:
                         scaled_size = (int(TILE_SIZE * self.camera.zoom), int(TILE_SIZE * self.camera.zoom))
-                        key = ("floor", int(TILE_SIZE * zoom))
-                    if key in self._cached_scaled_tiles:
-                        base_tile = self._cached_scaled_tiles[key]
-                    else:
                         base_tile = pygame.transform.scale(base_tile, scaled_size)
-                        self._cached_scaled_tiles[key] = base_tile
                     surface.blit(base_tile, (sx, sy))
 
                 if (tx, ty) in self.current_blocked:
@@ -2400,12 +2337,7 @@ class Game:
                     w_tile = wall_tile
                     if self.camera.zoom != 1.0:
                         scaled_size = (int(TILE_SIZE * self.camera.zoom), int(TILE_SIZE * self.camera.zoom))
-                        key = ("wall", int(TILE_SIZE * zoom))
-                    if key in self._cached_scaled_tiles:
-                        w_tile = self._cached_scaled_tiles[key]
-                    else:
                         w_tile = pygame.transform.scale(wall_tile, scaled_size)
-                        self._cached_scaled_tiles[key] = w_tile
                     surface.blit(w_tile, (sx, sy))
                     # Optional sparse contextual props
                     prop_key = obstacle_prop_for_tile(self.chapter.id, tx, ty)
@@ -2535,17 +2467,37 @@ class Game:
         pass
 
     def draw_pet_companion(self, surface):
-        now = pygame.time.get_ticks()
-        orbit_x = self.player.x - 34 + math.sin(now * 0.004) * 18
-        orbit_y = self.player.y + 22 + math.cos(now * 0.003) * 12
-        sx, sy = self.camera.world_to_screen(orbit_x, orbit_y)
-        surface.blit(self.current_pet, self.current_pet.get_rect(center=(sx, sy)))
-        # Enhanced orbital effect
-        for i in range(3):
-            ang = now * 0.005 + i * 2.09
-            px = sx + math.cos(ang) * 15
-            py = sy + math.sin(ang) * 15
-            pygame.draw.circle(screen, (200, 220, 255, 100), (int(px), int(py)), 3)
+        if self.current_pet_instance:
+            self.current_pet_instance.draw(surface, self.camera)
+
+    def apply_pet_effects(self):
+        """Apply current pet's attributes to player and game stats."""
+        # Reset defaults (assuming base values)
+        self.player.speed = 5
+        self.player.max_health = 300
+        
+        if not self.current_pet_instance:
+            return
+            
+        attr = self.current_pet_instance.attributes
+        
+        # Apply Speed
+        if "speed_mult" in attr:
+            self.player.speed *= attr["speed_mult"]
+            
+        # Apply Health
+        if "max_health_add" in attr:
+            self.player.max_health += attr["max_health_add"]
+            self.player.health = min(self.player.health + attr["max_health_add"], self.player.max_health)
+            
+        # Armor add (initial)
+        if "armor_add" in attr and getattr(self, "stats_start", 0) > pygame.time.get_ticks() - 1000:
+            self.player.armor = max(self.player.armor, attr["armor_add"])
+
+        self.player.damage_mult = attr.get("damage_mult", 1.0)
+        self.player.fire_rate_mult = attr.get("fire_rate_mult", 1.0)
+        self.player.money_mult = attr.get("money_mult", 1.0)
+        self.player.regen = attr.get("regen", 0.0)
 
     def draw_chapter_backdrop(self, surface):
         top = self.chapter.chapter_color
@@ -2664,8 +2616,8 @@ class Game:
             if not entry.enemy.is_dead:
                 ex, ey = entry.tile()
                 pygame.draw.circle(screen, RED, (int(rect.x + ex * sx), int(rect.y + ey * sy)), 2)
-        if self.last_hint_path:
-            for tile in self.last_hint_path:
+        if self.exit_path:
+            for tile in self.exit_path:
                 pygame.draw.rect(screen, YELLOW, (rect.x + tile[0] * sx, rect.y + tile[1] * sy, max(1, sx), max(1, sy)), 1)
         px, py = self.current_tile()
         pygame.draw.circle(screen, WHITE, (int(rect.x + px * sx), int(rect.y + py * sy)), 3)
@@ -2823,7 +2775,7 @@ class Game:
                 pygame.draw.rect(screen, item.color, (rect.x + item.grid_pos[0] * scale, rect.y + item.grid_pos[1] * scale, scale, scale))
         for npc in self.chapter.npcs:
             pygame.draw.circle(screen, CYAN, (int(rect.x + npc.grid_pos[0] * scale), int(rect.y + npc.grid_pos[1] * scale)), 4)
-        for tile in self.last_hint_path:
+        for tile in self.exit_path:
             pygame.draw.rect(screen, YELLOW, (rect.x + tile[0] * scale, rect.y + tile[1] * scale, scale, scale), 1)
         px, py = self.current_tile()
         pygame.draw.circle(screen, WHITE, (int(rect.x + px * scale), int(rect.y + py * scale)), 5)
@@ -3076,6 +3028,7 @@ class Game:
         y = info_rect.y + 40
         lines = [
             f"Kills: {self.kill_count}", f"Saved: {self.saved_npcs}",
+            f"Money: {self.money}",
             "B: Open Shop", "TAB: Path Mode", "M: Full Map"
         ]
         for line in lines:
@@ -3106,6 +3059,12 @@ class Game:
             ("weapon_grenadelauncher", "GrenadeLauncher", "Buy 1 GrenadeLauncher"),
             ("weapon_poisongun", "PoisonGun", "Buy 1 PoisonGun"),
             ("weapon_taesar", "Taesar Gun", "Buy 1 Taesar"),
+            ("pet_blue_bird", "Blue Bird", "Pet: +15% Tốc độ"),
+            ("pet_cat_gray", "Gray Cat", "Pet: +50 HP & Regen"),
+            ("pet_cat_orange", "Orange Cat", "Pet: +20% Damage"),
+            ("pet_eagle", "Eagle", "Pet: +15% Fire Rate"),
+            ("pet_fox", "Fox", "Pet: +25 Giáp"),
+            ("pet_racoon", "Racoon", "Pet: +50% Tiền"),
         ]
         weapon_cards = {
             "weapon_pistol": CARD_WEAPON_PISTOL,
@@ -3114,6 +3073,12 @@ class Game:
             "weapon_grenadelauncher": CARD_WEAPON_GRENADE,
             "weapon_poisongun": CARD_WEAPON_POISON,
             "weapon_taesar": CARD_WEAPON_TAESAR,
+            "pet_blue_bird": CARD_PET_BIRD,
+            "pet_cat_gray": CARD_PET_GRAY_CAT,
+            "pet_cat_orange": CARD_PET_ORANGE_CAT,
+            "pet_eagle": CARD_PET_EAGLE,
+            "pet_fox": CARD_PET_FOX,
+            "pet_racoon": CARD_PET_RACOON,
         }
         for i, (sid, title, desc) in enumerate(self.shop_items):
             r, c = i // 3, i % 3
@@ -3173,7 +3138,18 @@ class Game:
                         candidates = WEAPON_DROP_POOL
                     data = dict(random.choice(candidates))
                     self.unlock_weapon(data, equip_now=True)
-                self.popup = f"Đã mua: {title}"
+                elif sid.startswith("pet_"):
+                    pet_id = sid.replace("pet_", "")
+                    if pet_id not in self.unlocked_pets:
+                        self.unlocked_pets.append(pet_id)
+                        self.popup = f"Đã mua Pet: {title}"
+                    else:
+                        self.popup = f"Đã trang bị Pet: {title}"
+                    
+                    self.current_pet_id = pet_id
+                    self.current_pet_instance = self.all_pets[pet_id]
+                    self.apply_pet_effects()
+                
                 self.popup_timer = pygame.time.get_ticks() + 1400
                 play_sound_effect("sfx_item_drop")
                 return
@@ -3201,6 +3177,28 @@ class Game:
             pygame.quit()
             sys.exit()
         
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_ESCAPE:
+                if self.state == "playing":
+                    if self.show_shop:
+                        self.show_shop = False
+                        return
+                    if self.show_map:
+                        self.show_map = False
+                        return
+                    if self.dialog_npc:
+                        # Optionally skip dialog or just pause? 
+                        # Genshin pauses even with dialog. Let's just pause.
+                        pass
+                    self.state = "pause"
+                    return
+                elif self.state == "pause":
+                    self.state = "playing"
+                    return
+                elif self.state == "menu":
+                    pygame.quit()
+                    sys.exit()
+
         if self.state == "menu":
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_RETURN:
@@ -3254,11 +3252,10 @@ class Game:
 
                 if event.key == pygame.K_b:
                     self.show_shop = not self.show_shop
+                    return
                 if self.show_shop: return
 
-                if event.key == pygame.K_ESCAPE:
-                    self.state = "pause"
-                elif event.key == pygame.K_m:
+                if event.key == pygame.K_m:
                     self.show_map = not self.show_map
                 elif event.key == pygame.K_TAB:
                     self.hint_mode_index = (self.hint_mode_index + 1) % len(self.hint_modes)
@@ -3283,9 +3280,7 @@ class Game:
                     self.skill_manager.use_skill(2, self.player.x, self.player.y, wmx, wmy)
 
         if self.state == "pause" and event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_ESCAPE:
-                self.state = "playing"
-            elif event.key == pygame.K_RETURN:
+            if event.key == pygame.K_RETURN:
                 self.state = "playing"
             elif event.key == pygame.K_m:
                 self.state = "menu"
