@@ -75,10 +75,9 @@ ARMORY = [
         "projectile_speed": 0,
         "damage": 120,
         "projectile_image": [
-            {"atlas": MELEE_BLUE, "tile": (32, 32)},
-            {"atlas": MELEE_GREEN, "tile": (32, 32)},
+            {"atlas": EFFECT_DIR + "custom_katana_slash_clean.png", "tile": (240, 363), "coords": [(0, 0), (1, 0), (2, 0), (3, 0)]},
         ],
-        "projectile_scale": (100, 100),
+        "projectile_scale": (80, 80),
         "melee": True,
     },
     {
@@ -91,9 +90,9 @@ ARMORY = [
         "projectile_speed": 0,
         "damage": 180,
         "projectile_image": [
-            {"atlas": MELEE_YELLOW, "tile": (32, 32)},
+            {"atlas": EFFECT_DIR + "custom_katana_slash_clean.png", "tile": (240, 363), "coords": [(0, 0), (1, 0), (2, 0), (3, 0)]},
         ],
-        "projectile_scale": (120, 120),
+        "projectile_scale": (100, 100),
         "melee": True,
     }
 ]
