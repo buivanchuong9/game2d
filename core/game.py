@@ -584,6 +584,32 @@ class Game:
         self.last_objective_text = ""
         self.objective_flash_until = 0
         self.show_shop = False
+        self.shop_category = "Weapons"
+        self.shop_categories = ["Weapons", "Pets", "Items"]
+        self.pending_transition = False
+        self.shop_content = {
+            "Items": [
+                ("heal", "Medkit +25", "Heal 25 HP"),
+                ("armor", "Armor +15", "Gain 15 armor"),
+                ("ammo", "Ammo +30", "Add 30 reserve ammo"),
+            ],
+            "Weapons": [
+                ("weapon_pistol", "Pistol", "Buy 1 Pistol"),
+                ("weapon_minigun", "Minigun", "Buy 1 Minigun"),
+                ("weapon_flamethrower", "FlameThrower", "Buy 1 FlameThrower"),
+                ("weapon_grenadelauncher", "GrenadeLauncher", "Buy 1 GrenadeLauncher"),
+                ("weapon_poisongun", "PoisonGun", "Buy 1 PoisonGun"),
+                ("weapon_taesar", "Taesar Gun", "Buy 1 Taesar"),
+            ],
+            "Pets": [
+                ("pet_blue_bird", "Blue Bird", "Pet: +15% Tốc độ"),
+                ("pet_cat_gray", "Gray Cat", "Pet: +50 HP & Regen"),
+                ("pet_cat_orange", "Orange Cat", "Pet: +20% Damage"),
+                ("pet_eagle", "Eagle", "Pet: +15% Fire Rate"),
+                ("pet_fox", "Fox", "Pet: +25 Giáp"),
+                ("pet_racoon", "Racoon", "Pet: +50% Tiền"),
+            ]
+        }
         
         play_bg_music()
         self.set_chapter(0)
@@ -2041,8 +2067,10 @@ class Game:
         dist = math.hypot(self.player.x - gate_cx, self.player.y - gate_cy)
         if dist <= DOOR_RADIUS:
             if self.chapter_index < len(self.chapters) - 1:
-                self.set_chapter(self.chapter_index + 1)
-                self.state = "playing"
+                if not self.show_shop:
+                    self.show_shop = True
+                    self.pending_transition = True
+                    self.shop_category = "Weapons"
             else:
                 # Final chapter — trigger win state
                 self.state = "win"
@@ -2315,11 +2343,13 @@ class Game:
         self.draw_chapter_backdrop(surface)
         
         # 2. Tiles
-        current_tiles = CHAPTER_TILES.get(self.chapter.id)
-        if not current_tiles:
-            base_1, base_2, wall_tile = DESERT_TILE, DESERT_TILE_ALT, DESERT_WALL
-        else:
-            base_1, base_2, wall_tile = current_tiles["floor1"], current_tiles["floor2"], current_tiles["wall"]
+        roof_wall_surf = safe_load("Sprites/Sprites_Environment/roof_wall.png", (TILE_SIZE, TILE_SIZE))
+        
+        base_1 = roof_wall_surf
+        base_2 = roof_wall_surf
+        
+        wall_tile = roof_wall_surf.copy()
+        wall_tile.fill((60, 60, 75), special_flags=pygame.BLEND_RGB_MULT)
 
         for ty in range(max(0, min_ty), min(GRID_SIZE, max_ty + 1)):
             for tx in range(max(0, min_tx), min(GRID_SIZE, max_tx + 1)):
@@ -2848,7 +2878,7 @@ class Game:
                 "E: Tương tác / nhặt đồ",
                 "Q / Lăn chuột: Đổi súng",
                 "1-2-3: Chọn nhanh súng",
-                "B: Mở shop vật phẩm",
+                "Shop: Tự động mở khi qua màn",
                 "TAB: Đổi thuật toán tìm đường",
                 "M: Mở minimap lớn",
                 "ESC: Tạm dừng",
@@ -3036,7 +3066,7 @@ class Game:
         lines = [
             f"Kills: {self.kill_count}", f"Saved: {self.saved_npcs}",
             f"Money: {self.money}",
-            "B: Open Shop", "TAB: Path Mode", "M: Full Map"
+            "Shop opens at Level Exit", "TAB: Path Mode", "M: Full Map"
         ]
         for line in lines:
             screen.blit(self.font_small.render(line, True, SOFT), (info_rect.x + 14, y))
@@ -3051,28 +3081,29 @@ class Game:
         pygame.draw.rect(screen, PANEL, shop_rect, border_radius=20)
         pygame.draw.rect(screen, WHITE, shop_rect, 2, border_radius=20)
         
-        screen.blit(self.font_title.render("SURVIVOR SHOP", True, YELLOW), (shop_rect.x + 40, shop_rect.y + 30))
-        screen.blit(self.font.render("Press B to close", True, WHITE), (shop_rect.right - 200, shop_rect.y + 40))
-        screen.blit(self.font_big.render(f"Money: {self.money}", True, YELLOW), (shop_rect.right - 260, shop_rect.y + 84))
+        screen.blit(self.font_title.render("SURVIVOR SHOP", True, YELLOW), (shop_rect.x + 40, shop_rect.y + 20))
+        screen.blit(self.font_big.render(f"Money: {self.money}", True, YELLOW), (shop_rect.right - 260, shop_rect.y + 30))
         
-        # Curated shop inventory (each costs 1 money)
-        self.shop_items = [
-            ("heal", "Medkit +25", "Heal 25 HP"),
-            ("armor", "Armor +15", "Gain 15 armor"),
-            ("ammo", "Ammo +30", "Add 30 reserve ammo"),
-            ("weapon_pistol", "Pistol", "Buy 1 Pistol"),
-            ("weapon_minigun", "Minigun", "Buy 1 Minigun"),
-            ("weapon_flamethrower", "FlameThrower", "Buy 1 FlameThrower"),
-            ("weapon_grenadelauncher", "GrenadeLauncher", "Buy 1 GrenadeLauncher"),
-            ("weapon_poisongun", "PoisonGun", "Buy 1 PoisonGun"),
-            ("weapon_taesar", "Taesar Gun", "Buy 1 Taesar"),
-            ("pet_blue_bird", "Blue Bird", "Pet: +15% Tốc độ"),
-            ("pet_cat_gray", "Gray Cat", "Pet: +50 HP & Regen"),
-            ("pet_cat_orange", "Orange Cat", "Pet: +20% Damage"),
-            ("pet_eagle", "Eagle", "Pet: +15% Fire Rate"),
-            ("pet_fox", "Fox", "Pet: +25 Giáp"),
-            ("pet_racoon", "Racoon", "Pet: +50% Tiền"),
-        ]
+        # Categories Tabs
+        tab_x = shop_rect.x + 40
+        tab_y = shop_rect.y + 90
+        tab_w = 150
+        tab_h = 40
+        for i, cat in enumerate(self.shop_categories):
+            color = YELLOW if self.shop_category == cat else SOFT
+            tab_rect = pygame.Rect(tab_x + i * (tab_w + 10), tab_y, tab_w, tab_h)
+            pygame.draw.rect(screen, CARD_ALT, tab_rect, border_radius=10)
+            if self.shop_category == cat:
+                pygame.draw.rect(screen, YELLOW, tab_rect, 2, border_radius=10)
+            txt = self.font.render(cat, True, color)
+            screen.blit(txt, txt.get_rect(center=tab_rect.center))
+
+        # OK Button (Next Level)
+        ok_rect = pygame.Rect(shop_rect.right - 180, shop_rect.bottom - 70, 140, 50)
+        pygame.draw.rect(screen, GREEN, ok_rect, border_radius=12)
+        ok_txt = self.font_big.render("OK", True, WHITE)
+        screen.blit(ok_txt, ok_txt.get_rect(center=ok_rect.center))
+
         weapon_cards = {
             "weapon_pistol": CARD_WEAPON_PISTOL,
             "weapon_minigun": CARD_WEAPON_MINIGUN,
@@ -3087,10 +3118,12 @@ class Game:
             "pet_fox": CARD_PET_FOX,
             "pet_racoon": CARD_PET_RACOON,
         }
-        for i, (sid, title, desc) in enumerate(self.shop_items):
+        
+        items = self.shop_content.get(self.shop_category, [])
+        for i, (sid, title, desc) in enumerate(items):
             r, c = i // 3, i % 3
             cx = shop_rect.x + 40 + c * 320
-            cy = shop_rect.y + 140 + r * 135
+            cy = shop_rect.y + 150 + r * 135
             card_rect = pygame.Rect(cx, cy, 290, 115)
             pygame.draw.rect(screen, CARD, card_rect, border_radius=16)
             pygame.draw.rect(screen, STROKE, card_rect, 1, border_radius=16)
@@ -3110,13 +3143,35 @@ class Game:
             screen.blit(self.font.render("Price: 1", True, YELLOW), (tx, card_rect.y + 86))
 
     def handle_shop_click(self, mx, my):
-        if not hasattr(self, "shop_items"):
-            return
         shop_rect = pygame.Rect(100, 50, SCREEN_WIDTH - 200, SCREEN_HEIGHT - 100)
-        for i, (sid, title, desc) in enumerate(self.shop_items):
+        
+        # Tabs clicks
+        tab_x = shop_rect.x + 40
+        tab_y = shop_rect.y + 90
+        tab_w = 150
+        tab_h = 40
+        for i, cat in enumerate(self.shop_categories):
+            tab_rect = pygame.Rect(tab_x + i * (tab_w + 10), tab_y, tab_w, tab_h)
+            if tab_rect.collidepoint(mx, my):
+                self.shop_category = cat
+                return
+
+        # OK Button click
+        ok_rect = pygame.Rect(shop_rect.right - 180, shop_rect.bottom - 70, 140, 50)
+        if ok_rect.collidepoint(mx, my):
+            if self.pending_transition:
+                self.set_chapter(self.chapter_index + 1)
+                self.state = "playing"
+                self.pending_transition = False
+            self.show_shop = False
+            return
+
+        # Item clicks
+        items = self.shop_content.get(self.shop_category, [])
+        for i, (sid, title, desc) in enumerate(items):
             r, c = i // 3, i % 3
             cx = shop_rect.x + 40 + c * 320
-            cy = shop_rect.y + 140 + r * 135
+            cy = shop_rect.y + 150 + r * 135
             card_rect = pygame.Rect(cx, cy, 290, 115)
             if card_rect.collidepoint(mx, my):
                 if self.money < 1:
@@ -3257,9 +3312,6 @@ class Game:
                     self.weapon_manager.cycle_weapon()
                 # No manual ENTER-to-progress; progression is via gates
 
-                if event.key == pygame.K_b:
-                    self.show_shop = not self.show_shop
-                    return
                 if self.show_shop: return
 
                 if event.key == pygame.K_m:
