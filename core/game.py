@@ -126,65 +126,11 @@ ROCKET_LAUNCHER_TRAILER = safe_load("Sprites/Sprites_Weapon/RPG-reisized.png", (
 MORTAR_TRAILER = safe_load("Sprites/Sprites_Building/SuperMortar.png", (180, 180))
 HELICOPTER = safe_load("Sprites/Sprites_Building/Helicopter.png", (150, 150))
 
-WEAPON_DROP_POOL = [
-    {
-        "name": "AK-47",
-        "fire_rate": 6.2,
-        "reload_time": 1.0,
-        "image_path": "Sprites/Sprites_Weapon/Assaut-rifle-3-scoped.png",
-        "projectile_speed": 9,
-        "damage": 48,
-        "projectile_scale": (36, 36),
-        "type": "rifle"
-    },
-    {
-        "name": "SMG",
-        "fire_rate": 9.0,
-        "reload_time": 0.9,
-        "image_path": "Sprites/Sprites_Weapon/SMG-4.png",
-        "projectile_speed": 10,
-        "damage": 34,
-        "projectile_scale": (34, 34),
-        "type": "smg"
-    },
-    {
-        "name": "Sniper",
-        "fire_rate": 1.2,
-        "reload_time": 1.8,
-        "image_path": "Sprites/Sprites_Weapon/Sniper-rifle-2-scoped.png",
-        "projectile_speed": 12,
-        "damage": 170,
-        "projectile_scale": (42, 42),
-        "type": "sniper"
-    },
-    {
-        "name": "Katana",
-        "fire_rate": 2.5,
-        "reload_time": 0.0,
-        "image_path": "Sprites/Sprites_Weapon/Katana.png",
-        "projectile_speed": 0,
-        "damage": 85,
-        "projectile_image": "Sprites/Sprites_Effect/Bullets/KatanaSlash.png",
-        "projectile_scale": (160, 160),
-        "type": "melee"
-    },
-    {
-        "name": "Plasma Gun",
-        "fire_rate": 6.0,
-        "reload_time": 1.2,
-        "image_path": "Sprites/Sprites_Weapon/PlasmaGun.png",
-        "projectile_speed": 15,
-        "damage": 95,
-        "projectile_scale": (48, 48),
-        "type": "plasma"
-    },
-]
-
-# Extend with big generated armory
+WEAPON_DROP_POOL = []
 for w in ARMORY:
-    # Normalize shape for WeaponManager.unlock_weapon
     data = dict(w)
-    if data.get("type") == "melee" or data.get("type_hint") == "melee":
+    # Ensure consistency for weapon types
+    if data.get("melee") or data.get("type") == "melee":
         data["type"] = "melee"
     WEAPON_DROP_POOL.append(data)
 
@@ -587,20 +533,21 @@ class Game:
         self.shop_category = "Weapons"
         self.shop_categories = ["Weapons", "Pets", "Items"]
         self.pending_transition = False
+        self.shop_scroll_y = 0
+        
+        # Weapons are generated from ARMORY
+        shop_weapons = []
+        for w in ARMORY:
+            sid = f"buy_weapon_{w['name']}"
+            shop_weapons.append((sid, w['name'], w.get('desc', f"Damage: {w['damage']} | Rate: {w['fire_rate']}")))
+
         self.shop_content = {
             "Items": [
                 ("heal", "Medkit +25", "Heal 25 HP"),
                 ("armor", "Armor +15", "Gain 15 armor"),
                 ("ammo", "Ammo +30", "Add 30 reserve ammo"),
             ],
-            "Weapons": [
-                ("weapon_pistol", "Pistol", "Buy 1 Pistol"),
-                ("weapon_minigun", "Minigun", "Buy 1 Minigun"),
-                ("weapon_flamethrower", "FlameThrower", "Buy 1 FlameThrower"),
-                ("weapon_grenadelauncher", "GrenadeLauncher", "Buy 1 GrenadeLauncher"),
-                ("weapon_poisongun", "PoisonGun", "Buy 1 PoisonGun"),
-                ("weapon_taesar", "Taesar Gun", "Buy 1 Taesar"),
-            ],
+            "Weapons": shop_weapons,
             "Pets": [
                 ("pet_blue_bird", "Blue Bird", "Pet: +15% Tốc độ"),
                 ("pet_cat_gray", "Gray Cat", "Pet: +50 HP & Regen"),
@@ -3104,43 +3051,66 @@ class Game:
         ok_txt = self.font_big.render("OK", True, WHITE)
         screen.blit(ok_txt, ok_txt.get_rect(center=ok_rect.center))
 
-        weapon_cards = {
-            "weapon_pistol": CARD_WEAPON_PISTOL,
-            "weapon_minigun": CARD_WEAPON_MINIGUN,
-            "weapon_flamethrower": CARD_WEAPON_FLAMETHROWER,
-            "weapon_grenadelauncher": CARD_WEAPON_GRENADE,
-            "weapon_poisongun": CARD_WEAPON_POISON,
-            "weapon_taesar": CARD_WEAPON_TAESAR,
-            "pet_blue_bird": CARD_PET_BIRD,
-            "pet_cat_gray": CARD_PET_GRAY_CAT,
-            "pet_cat_orange": CARD_PET_ORANGE_CAT,
-            "pet_eagle": CARD_PET_EAGLE,
-            "pet_fox": CARD_PET_FOX,
-            "pet_racoon": CARD_PET_RACOON,
-        }
+        # Scrollable area
+        scroll_rect = pygame.Rect(shop_rect.x + 20, shop_rect.y + 140, shop_rect.width - 40, shop_rect.height - 230)
+        items_surf = pygame.Surface((scroll_rect.width, 2000), pygame.SRCALPHA)
         
         items = self.shop_content.get(self.shop_category, [])
         for i, (sid, title, desc) in enumerate(items):
             r, c = i // 3, i % 3
-            cx = shop_rect.x + 40 + c * 320
-            cy = shop_rect.y + 150 + r * 135
+            cx = c * 320
+            cy = r * 135
             card_rect = pygame.Rect(cx, cy, 290, 115)
-            pygame.draw.rect(screen, CARD, card_rect, border_radius=16)
-            pygame.draw.rect(screen, STROKE, card_rect, 1, border_radius=16)
-            pygame.draw.rect(screen, YELLOW, (card_rect.x, card_rect.y, card_rect.width, 4), border_top_left_radius=16, border_top_right_radius=16)
-            # show Shop_Cards for weapon categories
-            card = weapon_cards.get(sid)
-            if card:
-                screen.blit(card, (card_rect.x + 10, card_rect.y + 10))
-                tx = card_rect.x + 10 + 72 + 12
+            pygame.draw.rect(items_surf, CARD, card_rect, border_radius=16)
+            pygame.draw.rect(items_surf, STROKE, card_rect, 1, border_radius=16)
+            pygame.draw.rect(items_surf, YELLOW, (card_rect.x, card_rect.y, card_rect.width, 4), border_top_left_radius=16, border_top_right_radius=16)
+            
+            # Icon / Image rendering
+            tx = 14
+            img = None
+            if sid.startswith("buy_weapon_"):
+                wname = sid.replace("buy_weapon_", "")
+                weapon_data = next((w for w in ARMORY if w["name"] == wname), None)
+                if weapon_data:
+                    try:
+                        img = pygame.image.load(weapon_data["image_path"]).convert_alpha()
+                        img = pygame.transform.scale(img, (64, 64))
+                    except: pass
+            elif sid.startswith("pet_"):
+                pet_id = sid.replace("pet_", "")
+                pet_cards = {
+                    "blue_bird": CARD_PET_BIRD,
+                    "fox": CARD_PET_FOX,
+                    "eagle": CARD_PET_EAGLE,
+                    "cat_gray": CARD_PET_GRAY_CAT,
+                    "cat_orange": CARD_PET_ORANGE_CAT,
+                    "racoon": CARD_PET_RACOON,
+                }
+                img = pet_cards.get(pet_id)
             else:
-                tx = card_rect.x + 14
-                icon = ITEM_SURFACES.get("heal" if sid == "heal" else "armor" if sid == "armor" else "ammo")
-                if icon:
-                    screen.blit(icon, (card_rect.right - 44, card_rect.y + 14))
-            screen.blit(self.font_big.render(title, True, WHITE), (tx, card_rect.y + 14))
-            screen.blit(self.font.render(desc, True, SOFT), (tx, card_rect.y + 56))
-            screen.blit(self.font.render("Price: 1", True, YELLOW), (tx, card_rect.y + 86))
+                # Items (heal, armor, ammo)
+                img = ITEM_SURFACES.get(sid)
+                if img:
+                    # Scale item icons a bit larger for the shop if needed
+                    img = pygame.transform.scale(img, (48, 48))
+
+            if img:
+                items_surf.blit(img, (cx + 12, cy + 25))
+                tx = 80 if sid.startswith("pet_") or sid.startswith("buy_weapon_") else 66
+
+            items_surf.blit(self.font_big.render(title, True, WHITE), (cx + tx, cy + 14))
+            items_surf.blit(self.font_small.render(desc, True, SOFT), (cx + tx, cy + 56))
+            items_surf.blit(self.font.render("Price: 1", True, YELLOW), (cx + tx, cy + 86))
+
+        # Blit clipped area
+        screen.blit(items_surf, (scroll_rect.x, scroll_rect.y), (0, self.shop_scroll_y, scroll_rect.width, scroll_rect.height))
+        
+        # Scroll indicator
+        if len(items) > 9:
+            pygame.draw.rect(screen, SOFT, (shop_rect.right - 10, scroll_rect.y, 4, scroll_rect.height), border_radius=2)
+            scroll_h = max(20, int(scroll_rect.height * (scroll_rect.height / 1200)))
+            scroll_y = scroll_rect.y + int(self.shop_scroll_y * (scroll_rect.height / 1200))
+            pygame.draw.rect(screen, YELLOW, (shop_rect.right - 10, min(scroll_rect.bottom - scroll_h, scroll_y), 4, scroll_h), border_radius=2)
 
     def handle_shop_click(self, mx, my):
         shop_rect = pygame.Rect(100, 50, SCREEN_WIDTH - 200, SCREEN_HEIGHT - 100)
@@ -3154,6 +3124,7 @@ class Game:
             tab_rect = pygame.Rect(tab_x + i * (tab_w + 10), tab_y, tab_w, tab_h)
             if tab_rect.collidepoint(mx, my):
                 self.shop_category = cat
+                self.shop_scroll_y = 0 # Reset scroll
                 return
 
         # OK Button click
@@ -3166,19 +3137,29 @@ class Game:
             self.show_shop = False
             return
 
-        # Item clicks
+        # Item clicks (with scroll offset)
+        scroll_rect = pygame.Rect(shop_rect.x + 20, shop_rect.y + 140, shop_rect.width - 40, shop_rect.height - 230)
+        if not scroll_rect.collidepoint(mx, my):
+            return
+
+        # Adjust mouse Y for scrolling
+        rel_mx = mx - scroll_rect.x
+        rel_my = my - scroll_rect.y + self.shop_scroll_y
+
         items = self.shop_content.get(self.shop_category, [])
         for i, (sid, title, desc) in enumerate(items):
             r, c = i // 3, i % 3
-            cx = shop_rect.x + 40 + c * 320
-            cy = shop_rect.y + 150 + r * 135
+            cx = c * 320
+            cy = r * 135
             card_rect = pygame.Rect(cx, cy, 290, 115)
-            if card_rect.collidepoint(mx, my):
+            
+            if card_rect.collidepoint(rel_mx, rel_my):
                 if self.money < 1:
                     self.popup = "Không đủ tiền."
                     self.popup_timer = pygame.time.get_ticks() + 1200
                     return
                 self.money -= 1
+                
                 if sid == "heal":
                     self.player.heal(25)
                 elif sid == "armor":
@@ -3187,19 +3168,12 @@ class Game:
                     w = self.weapon_manager.current_weapon
                     if w and not getattr(w, "melee", False):
                         w.reserve_ammo += 30
-                elif sid.startswith("weapon_"):
-                    # Filter big pool by type
-                    want = sid.replace("weapon_", "")
-                    alias = {
-                        "grenadelauncher": "grenade_launcher",
-                        "poisongun": "poison",
-                    }
-                    want = alias.get(want, want)
-                    candidates = [w for w in WEAPON_DROP_POOL if w.get("type") == want]
-                    if not candidates:
-                        candidates = WEAPON_DROP_POOL
-                    data = dict(random.choice(candidates))
-                    self.unlock_weapon(data, equip_now=True)
+                elif sid.startswith("buy_weapon_"):
+                    wname = sid.replace("buy_weapon_", "")
+                    weapon_data = next((w for w in ARMORY if w["name"] == wname), None)
+                    if weapon_data:
+                        self.unlock_weapon(dict(weapon_data), equip_now=True)
+                        self.popup = f"Đã mua: {title}"
                 elif sid.startswith("pet_"):
                     pet_id = sid.replace("pet_", "")
                     if pet_id not in self.unlocked_pets:
@@ -3367,6 +3341,10 @@ class Game:
                 elif btns.get("quit") and btns["quit"].collidepoint(mx, my):
                     pygame.quit()
                     sys.exit()
+        if event.type == pygame.MOUSEWHEEL and self.state == "playing" and self.show_shop:
+            self.shop_scroll_y = max(0, self.shop_scroll_y - event.y * 30)
+            return
+
         if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
             self.mouse_down = False
 
