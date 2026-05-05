@@ -65,13 +65,18 @@ from systems.audio import SOUND_EFFECTS, SOUND_BY_BASENAME, load_sounds
 
 # Load all graphics with absolute paths via BASE_DIR from ui.py
 from systems.ui import BASE_DIR as _ASSET_BASE
+# Load all graphics surfaces recursively from the Sprites directory
 ALL_GRAPHICS_SURFACES = {}
-for _gfx_path in ALL_GRAPHICS:
-    try:
-        _abs = os.path.join(_ASSET_BASE, _gfx_path) if not os.path.isabs(_gfx_path) else _gfx_path
-        ALL_GRAPHICS_SURFACES[_gfx_path] = pygame.image.load(_abs).convert_alpha()
-    except Exception as _e:
-        print(f"[GRAPHICS LOAD ERROR] {_gfx_path}: {_e}")
+_sprites_dir = os.path.join(_ASSET_BASE, "Sprites")
+for root, dirs, files in os.walk(_sprites_dir):
+    for file in files:
+        if file.lower().endswith(('.png', '.jpg', '.jpeg', '.webp')):
+            _abs_path = os.path.join(root, file)
+            _rel_path = os.path.relpath(_abs_path, _ASSET_BASE).replace("\\", "/")
+            try:
+                ALL_GRAPHICS_SURFACES[_rel_path] = pygame.image.load(_abs_path).convert_alpha()
+            except Exception as _e:
+                print(f"[GRAPHICS LOAD ERROR] {_rel_path}: {_e}")
 
 from combat.skill import SkillManager, Skill
 
@@ -2435,14 +2440,16 @@ class Game:
                 color = GRAY if npc.interacted else npc.color
                 
                 # Use sprite if available
-                if npc.sprite_path and npc.sprite_path in ALL_GRAPHICS_SURFACES:
-                    sprite = ALL_GRAPHICS_SURFACES[npc.sprite_path]
+                sprite_key = npc.sprite_path
+                if sprite_key and sprite_key in ALL_GRAPHICS_SURFACES:
+                    sprite = ALL_GRAPHICS_SURFACES[sprite_key]
                     if self.camera.zoom != 1.0:
                         sprite = pygame.transform.scale(sprite, (int(sprite.get_width() * self.camera.zoom), int(sprite.get_height() * self.camera.zoom)))
                     surface.blit(sprite, sprite.get_rect(center=(sx, sy)))
                 else:
-                    pygame.draw.circle(surface, color, (sx, sy), 7 * self.camera.zoom)
-                    pygame.draw.circle(surface, WHITE, (sx, sy), 7 * self.camera.zoom, 1)
+                    # Fallback to circle
+                    pygame.draw.circle(surface, color, (sx, sy), 10 * self.camera.zoom)
+                    pygame.draw.circle(surface, WHITE, (sx, sy), 10 * self.camera.zoom, 2)
 
         for entry in self.story_enemies:
             if self.camera.is_visible(entry.enemy.x, entry.enemy.y):
@@ -2751,40 +2758,75 @@ class Game:
             self.draw_full_map()
 
     def draw_dialog(self):
-        # Genshin-like cinematic dialog box
+        # Semi-transparent background overlay
         overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
-        overlay.fill((10, 8, 12, 110))
+        overlay.fill((10, 8, 12, 160))
         screen.blit(overlay, (0, 0))
 
-        dialog_rect = pygame.Rect(48, SCREEN_HEIGHT - 210, SCREEN_WIDTH - 96, 168)
+        # Dialogue Box Position (Modern Bottom Style)
+        dialog_rect = pygame.Rect(60, SCREEN_HEIGHT - 220, SCREEN_WIDTH - 120, 160)
+        
+        # 1. Shadow for the box
+        shadow_rect = dialog_rect.copy()
+        shadow_rect.x += 8
+        shadow_rect.y += 8
+        pygame.draw.rect(screen, (0, 0, 0, 100), shadow_rect, border_radius=20)
+        
+        # 2. Main Box
         panel = pygame.Surface((dialog_rect.width, dialog_rect.height), pygame.SRCALPHA)
-        panel.fill((22, 22, 28, 210))
+        panel.fill((28, 30, 38, 240))
         screen.blit(panel, dialog_rect.topleft)
-        pygame.draw.rect(screen, (255, 255, 255, 60), dialog_rect, 2, border_radius=18)
+        pygame.draw.rect(screen, (*self.dialog_color, 180), dialog_rect, 3, border_radius=20)
 
-        # Portrait + speaker
-        portrait_center = (dialog_rect.x + 70, dialog_rect.y + 64)
-        pygame.draw.circle(screen, self.dialog_color, portrait_center, 30)
-        pygame.draw.circle(screen, WHITE, portrait_center, 30, 2)
-        screen.blit(self.font_big.render(self.dialog_speaker, True, self.dialog_color), (dialog_rect.x + 115, dialog_rect.y + 18))
+        # 3. Portrait sticking out of the top-left
+        portrait_box = pygame.Rect(dialog_rect.x + 30, dialog_rect.y - 120, 150, 150)
+        # Background for portrait
+        pygame.draw.rect(screen, (35, 38, 48), portrait_box, border_radius=15)
+        pygame.draw.rect(screen, self.dialog_color, portrait_box, 3, border_radius=15)
+        
+        # Draw Character Sprite in portrait box
+        sprite_key = getattr(self.dialog_npc, "sprite_path", "Sprites/Sprites_Player/mega_scientist_walk.png")
+        if sprite_key in ALL_GRAPHICS_SURFACES:
+            char_sprite = ALL_GRAPHICS_SURFACES[sprite_key]
+            # If it's a sheet, take first frame
+            if char_sprite.get_width() > 128:
+                char_sprite = char_sprite.subsurface((0, 0, 64, 64))
+            char_sprite = pygame.transform.scale(char_sprite, (130, 130))
+            screen.blit(char_sprite, char_sprite.get_rect(center=portrait_box.center))
+        else:
+            # Fallback circle
+            pygame.draw.circle(screen, self.dialog_color, portrait_box.center, 50)
 
-        # Typewriter text
+        # 4. Speaker Name (Floating tag)
+        name_tag = pygame.Rect(dialog_rect.x + 190, dialog_rect.y - 30, 200, 40)
+        pygame.draw.rect(screen, (40, 44, 55), name_tag, border_radius=10)
+        pygame.draw.rect(screen, self.dialog_color, name_tag, 2, border_radius=10)
+        name_surf = self.font_big.render(self.dialog_speaker, True, self.dialog_color)
+        screen.blit(name_surf, (name_tag.centerx - name_surf.get_width()//2, name_tag.centery - name_surf.get_height()//2))
+
+        # 5. Typewriter text
         pages = []
         for raw in (self.dialog_lines or [""]):
-            pages.extend(wrap_text(raw, self.font, dialog_rect.width - 150))
-        if not pages:
-            pages = [""]
+            pages.extend(wrap_text(raw, self.font, dialog_rect.width - 80))
+        if not pages: pages = [""]
         page = pages[max(0, min(self.dialog_page_index, len(pages) - 1))]
 
         now = pygame.time.get_ticks()
         elapsed = max(0, now - getattr(self, "dialog_started_at", now))
         max_chars = int((elapsed / 1000.0) * float(getattr(self, "dialog_speed_cps", 70)))
         shown = page[:max_chars]
-        screen.blit(self.font.render(shown, True, WHITE), (dialog_rect.x + 115, dialog_rect.y + 70))
+        
+        # Render text with line breaks if wrapped
+        lines = shown.split('\n')
+        yy = dialog_rect.y + 45
+        for line in lines:
+            screen.blit(self.font.render(line, True, (240, 240, 250)), (dialog_rect.x + 40, yy))
+            yy += 32
 
-        # Hint
-        hint = "SPACE/ENTER để tiếp tục"
-        screen.blit(self.font_small.render(hint, True, (220, 220, 230)), (dialog_rect.right - 260, dialog_rect.bottom - 32))
+        # 6. Hint
+        hint = "Press [E] to continue..."
+        hint_surf = self.font_small.render(hint, True, (150, 150, 170))
+        screen.blit(hint_surf, (dialog_rect.right - hint_surf.get_width() - 20, dialog_rect.bottom - 30))
 
     def draw_full_map(self):
         overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
