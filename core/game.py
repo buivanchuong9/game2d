@@ -537,6 +537,19 @@ class Game:
         self.show_backpack = False
         self.autoplay = False
         
+        # Lobby Assets
+        self.lobby_bg = safe_load("Sprites/lobby_background.png", (SCREEN_WIDTH, SCREEN_HEIGHT))
+        self.menu_start_time = pygame.time.get_ticks()
+        self.menu_particles = []
+        for _ in range(40):
+            self.menu_particles.append({
+                "x": random.randint(0, SCREEN_WIDTH),
+                "y": random.randint(0, SCREEN_HEIGHT),
+                "speed": random.uniform(0.5, 2.0),
+                "size": random.randint(1, 3),
+                "alpha": random.randint(50, 200)
+            })
+        
         # Weapons are generated from ARMORY
         shop_weapons = []
         for w in ARMORY:
@@ -2768,75 +2781,190 @@ class Game:
         screen.blit(self.font_big.render("Bản Đồ Chiến Thuật", True, WHITE), (rect.x + 18, rect.y - 34))
 
     def draw_menu(self):
-        for y in range(0, SCREEN_HEIGHT, 32):
-            pygame.draw.line(screen, (28, 30, 40), (0, y), (SCREEN_WIDTH, y), 1)
-        shadow = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
-        shadow.fill((10, 8, 12, 180))
-        screen.blit(shadow, (0, 0))
-        screen.blit(self.font_title.render("LAST ROOF", True, WHITE), (120, 110))
-        screen.blit(self.font_big.render("Escape City", True, ORANGE), (124, 164))
-        menu_lines = [
-            "ENTER  Xem trailer và bắt đầu",
-            "H      Hướng dẫn chơi",
-            "<- ->  Chọn map",
-            "ESC    Thoát",
+        # Time-based animations
+        now = pygame.time.get_ticks()
+        elapsed = (now - self.menu_start_time) / 1000.0
+        
+        # 1. Background with subtle parallax/zoom effect
+        if self.lobby_bg:
+            zoom = 1.0 + math.sin(elapsed * 0.2) * 0.05
+            bg_w, bg_h = int(SCREEN_WIDTH * zoom), int(SCREEN_HEIGHT * zoom)
+            bg_scaled = pygame.transform.smoothscale(self.lobby_bg, (bg_w, bg_h))
+            screen.blit(bg_scaled, (-(bg_w - SCREEN_WIDTH)//2, -(bg_h - SCREEN_HEIGHT)//2))
+        else:
+            screen.fill((10, 12, 18))
+            for y in range(0, SCREEN_HEIGHT, 32):
+                pygame.draw.line(screen, (28, 30, 40), (0, y), (SCREEN_WIDTH, y), 1)
+
+        # 2. Cinematic Overlays
+        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        # Gradient overlay from left
+        for i in range(SCREEN_WIDTH // 2):
+            alpha = int(220 * (1.0 - i / (SCREEN_WIDTH // 2)))
+            pygame.draw.line(overlay, (5, 5, 10, alpha), (i, 0), (i, SCREEN_HEIGHT))
+        screen.blit(overlay, (0, 0))
+
+        # 2.5 Animated Particles
+        for p in self.menu_particles:
+            p["y"] -= p["speed"]
+            if p["y"] < -10:
+                p["y"] = SCREEN_HEIGHT + 10
+                p["x"] = random.randint(0, SCREEN_WIDTH)
+            
+            p_surf = pygame.Surface((p["size"]*2, p["size"]*2), pygame.SRCALPHA)
+            pygame.draw.circle(p_surf, (255, 200, 100, p["alpha"]), (p["size"], p["size"]), p["size"])
+            screen.blit(p_surf, (p["x"], p["y"]))
+
+        # 3. Title Section (Pulsing Glow)
+        glow_alpha = int(128 + 64 * math.sin(elapsed * 2))
+        title_color = (255, 255, 255)
+        subtitle_color = (255, 165, 0) # Orange
+        
+        title_surf = self.font_title.render("LAST ROOF", True, title_color)
+        title_rect = title_surf.get_rect(topleft=(120, 110))
+        
+        # Draw shadow/glow
+        shadow_surf = self.font_title.render("LAST ROOF", True, (255, 100, 0))
+        shadow_surf.set_alpha(glow_alpha)
+        screen.blit(shadow_surf, (title_rect.x + 2, title_rect.y + 2))
+        screen.blit(title_surf, title_rect)
+        
+        subtitle_surf = self.font_big.render("Escape City", True, subtitle_color)
+        screen.blit(subtitle_surf, (124, 175))
+
+        # 4. Menu Items (with entrance animation)
+        menu_items = [
+            ("ENTER", "Bắt đầu hành trình"),
+            ("H", "Hướng dẫn sinh tồn"),
+            ("<- ->", "Khám phá bản đồ"),
+            ("ESC", "Rời khỏi thành phố"),
         ]
+        
         y = 280
-        for line in menu_lines:
-            screen.blit(self.font_big.render(line, True, WHITE), (126, y))
-            y += 44
-        teaser = [
-            "Sinh tồn 2D theo chương, có NPC và hệ gợi ý đường đi.",
-            "Bấm TAB trong game để đổi BFS / DFS / SAFE / A*.",
-            "Tiếng Việt có dấu: ă â ê ô ơ ư đ.",
+        for i, (key, label) in enumerate(menu_items):
+            # Slide in effect
+            slide = max(0, 1.0 - elapsed * 2 + i * 0.2) * 200
+            item_x = 126 - slide
+            
+            # Hover/Active effect (not real mouse hover yet, just visual style)
+            icon_color = YELLOW if i == 0 else WHITE
+            
+            # Key Icon
+            key_rect = pygame.Rect(item_x, y, 90 if len(key) > 1 else 40, 34)
+            pygame.draw.rect(screen, (40, 44, 52), key_rect, border_radius=6)
+            pygame.draw.rect(screen, icon_color, key_rect, 2, border_radius=6)
+            key_txt = self.font_small.render(key, True, icon_color)
+            screen.blit(key_txt, key_txt.get_rect(center=key_rect.center))
+            
+            # Label
+            screen.blit(self.font.render(label, True, WHITE), (key_rect.right + 20, y + 4))
+            y += 54
+
+        # 5. Features / Teaser (Bottom Left)
+        features = [
+            "• Sinh tồn theo chương với cốt truyện kịch tính",
+            "• Hệ thống NPC tương tác và nhiệm vụ đa dạng",
+            "• Đồ họa 2D Pixel Art hiện đại, âm thanh sống động",
         ]
-        y = 500
-        for line in teaser:
-            screen.blit(self.font.render(line, True, WHITE), (126, y))
-            y += 28
+        fy = SCREEN_HEIGHT - 120
+        for line in features:
+            screen.blit(self.font_small.render(line, True, SOFT), (126, fy))
+            fy += 24
 
-        map_rect = pygame.Rect(520, 390, 560, 330)
-        pygame.draw.rect(screen, PANEL, map_rect)
-        pygame.draw.rect(screen, ORANGE, map_rect, 2)
-        screen.blit(self.font_big.render("Map Selector", True, ORANGE), (map_rect.x + 18, map_rect.y + 16))
-        screen.blit(self.font_small.render(f"Map đang chọn: {self.selected_map_name}", True, WHITE), (map_rect.x + 18, map_rect.y + 66))
-        screen.blit(self.font_small.render("Phím mũi tên trái/phải để đổi map", True, SOFT), (map_rect.x + 18, map_rect.y + 88))
-
-        list_top = map_rect.y + 118
+        # 6. Map Selector (Premium Look)
+        map_rect = pygame.Rect(SCREEN_WIDTH - 500, 110, 420, 580)
+        # Glassmorphism effect
+        glass = pygame.Surface((map_rect.width, map_rect.height), pygame.SRCALPHA)
+        glass.fill((30, 32, 44, 160))
+        screen.blit(glass, map_rect.topleft)
+        pygame.draw.rect(screen, (255, 255, 255, 40), map_rect, 1, border_radius=12)
+        
+        # Map Selector Title
+        header_y = map_rect.y + 24
+        screen.blit(self.font_big.render("CHỌN KHU VỰC", True, WHITE), (map_rect.x + 30, header_y))
+        pygame.draw.line(screen, ORANGE, (map_rect.x + 30, header_y + 45), (map_rect.right - 30, header_y + 45), 2)
+        
+        # Map List
+        list_top = header_y + 70
         total = len(self.map_assets)
-        start = max(0, min(self.selected_map_index - 2, max(0, total - 5)))
-        for idx in range(start, min(total, start + 5)):
+        start = max(0, min(self.selected_map_index - 3, max(0, total - 8)))
+        for idx in range(start, min(total, start + 8)):
             path = self.map_assets[idx]
-            name = "Default Tilemap" if path is None else os.path.splitext(os.path.basename(path))[0]
-            color = YELLOW if idx == self.selected_map_index else WHITE
-            prefix = ">" if idx == self.selected_map_index else " "
-            screen.blit(self.font_small.render(f"{prefix} {name}", True, color), (map_rect.x + 18, list_top))
-            list_top += 28
+            name = "Vùng Đất Mặc Định" if path is None else os.path.splitext(os.path.basename(path))[0]
+            name = name.replace("_", " ").title()
+            
+            is_selected = (idx == self.selected_map_index)
+            color = YELLOW if is_selected else SOFT
+            
+            if is_selected:
+                # Selection Highlight
+                sel_rect = pygame.Rect(map_rect.x + 15, list_top - 5, map_rect.width - 30, 34)
+                pygame.draw.rect(screen, (255, 165, 0, 40), sel_rect, border_radius=6)
+                pygame.draw.rect(screen, ORANGE, sel_rect, 1, border_radius=6)
+            
+            screen.blit(self.font.render(name, True, color), (map_rect.x + 40, list_top))
+            list_top += 40
 
+        # Map Preview Image
         if self.map_background_surface is not None:
-            preview = pygame.transform.smoothscale(self.map_background_surface, (240, 140))
-            preview_rect = pygame.Rect(map_rect.right - 258, map_rect.y + 160, 240, 140)
+            preview_h = 160
+            preview_w = int(preview_h * (MAP_WIDTH / MAP_HEIGHT))
+            preview = pygame.transform.smoothscale(self.map_background_surface, (preview_w, preview_h))
+            preview_rect = preview.get_rect(centerx=map_rect.centerx, bottom=map_rect.bottom - 40)
+            
+            # Shadow for preview
+            shadow_rect = preview_rect.copy()
+            shadow_rect.inflate_ip(10, 10)
+            pygame.draw.rect(screen, (0, 0, 0, 100), shadow_rect, border_radius=8)
+            
             screen.blit(preview, preview_rect.topleft)
-            pygame.draw.rect(screen, WHITE, preview_rect, 1)
+            pygame.draw.rect(screen, WHITE, preview_rect, 2, border_radius=4)
+            
+            # Map Name Overlay on Preview
+            name_label = self.font_small.render(self.selected_map_name, True, WHITE)
+            label_bg = pygame.Surface((preview_w, 24), pygame.SRCALPHA)
+            label_bg.fill((0, 0, 0, 180))
+            screen.blit(label_bg, (preview_rect.x, preview_rect.bottom - 24))
+            screen.blit(name_label, (preview_rect.x + 10, preview_rect.bottom - 22))
+
+        # 7. Help Overlay
         if self.show_help:
-            help_rect = pygame.Rect(520, 100, 330, 280)
-            pygame.draw.rect(screen, PANEL, help_rect)
-            pygame.draw.rect(screen, CYAN, help_rect, 2)
+            help_w, help_h = 500, 450
+            help_rect = pygame.Rect((SCREEN_WIDTH - help_w)//2, (SCREEN_HEIGHT - help_h)//2, help_w, help_h)
+            
+            # Blur-like background for help
+            help_shadow = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+            help_shadow.fill((0, 0, 0, 200))
+            screen.blit(help_shadow, (0, 0))
+            
+            pygame.draw.rect(screen, PANEL, help_rect, border_radius=20)
+            pygame.draw.rect(screen, CYAN, help_rect, 2, border_radius=20)
+            
+            title_txt = self.font_big.render("HƯỚNG DẪN SINH TỒN", True, CYAN)
+            screen.blit(title_txt, title_txt.get_rect(centerx=help_rect.centerx, y=help_rect.y + 30))
+            
             lines = [
-                "WASD: Di chuyển",
-                "E: Tương tác / nhặt đồ",
-                "Q / Lăn chuột: Đổi súng",
-                "1-2-3: Chọn nhanh súng",
-                "Shop: Tự động mở khi qua màn",
-                "TAB: Đổi thuật toán tìm đường",
-                "M: Mở minimap lớn",
-                "ESC: Tạm dừng",
-                "Mục tiêu mỗi chương ở bảng bên phải",
+                ("WASD", "Di chuyển nhân vật"),
+                ("Chuột Trái", "Tấn công / Sử dụng vũ khí"),
+                ("E", "Tương tác / Nhặt vật phẩm"),
+                ("Q / Cuộn chuột", "Chuyển đổi vũ khí"),
+                ("1 - 6", "Sử dụng kỹ năng đặc biệt"),
+                ("B", "Mở túi đồ / Trang bị"),
+                ("TAB", "Thay đổi thuật toán dẫn đường"),
+                ("M", "Xem bản đồ chiến thuật"),
+                ("ESC", "Tạm dừng trò chơi"),
             ]
-            yy = help_rect.y + 26
-            for line in lines:
-                screen.blit(self.font.render(line, True, WHITE), (help_rect.x + 18, yy))
-                yy += 32
+            
+            yy = help_rect.y + 90
+            for key, desc in lines:
+                k_surf = self.font.render(key, True, YELLOW)
+                d_surf = self.font.render(desc, True, WHITE)
+                screen.blit(k_surf, (help_rect.x + 40, yy))
+                screen.blit(d_surf, (help_rect.x + 200, yy))
+                yy += 36
+            
+            hint_txt = self.font_small.render("Nhấn H để đóng hướng dẫn", True, SOFT)
+            screen.blit(hint_txt, hint_txt.get_rect(centerx=help_rect.centerx, bottom=help_rect.bottom - 20))
 
     def draw_intro(self):
         scenes = self.trailer_scenes()
