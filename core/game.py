@@ -49,7 +49,7 @@ screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SCALED | 
 pygame.display.set_caption("Last Roof: Escape City")
 clock = pygame.time.Clock()
 
-from entities.enemy import FlyingEye, Goblin, Mushroom, Skeleton, BigFlyingEye, DashingGoblin, TeleportingMushroom, EvilWizard, OldGuardian
+from entities.enemy import FlyingEye, Goblin, Mushroom, Skeleton, BigFlyingEye, DashingGoblin, TeleportingMushroom, EvilWizard, OldGuardian, NightTerror, ShadowWraith
 from systems.pathfinding import bfs
 from entities.player import Player
 from combat.weapon import WeaponManager
@@ -1111,6 +1111,8 @@ class Game:
                     (TeleportingMushroom, (30, 12), "special"),
                     (Mushroom, (16, 16), "tank"),
                     (EvilWizard, (36, 30), "ranged"),
+                    (ShadowWraith, (10, 10), "fast"),
+                    (ShadowWraith, (30, 30), "fast"),
                 ],
                 (160, 160, 200),
                 "Radio: Tầng hầm rất nguy hiểm. Bật được điện là sẽ mở được cửa sắt dẫn đến phòng thí nghiệm.",
@@ -1190,6 +1192,7 @@ class Game:
                 [
                     (BigFlyingEye, (33, 35), {"type": "boss", "health": 150}),
                     (OldGuardian, (25, 25), {"type": "boss", "health": 1200}),
+                    (NightTerror, (15, 15), {"type": "boss", "health": 2000}),
                     (EvilWizard, (35, 10), "ranged"),
                     (EvilWizard, (10, 35), "ranged"),
                 ],
