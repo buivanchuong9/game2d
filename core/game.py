@@ -784,8 +784,12 @@ class Game:
             ItemPickup((10, 31), "Bandage", "Băng gạc từ túi cứu hộ sân thượng.", "heal", amount=25),
         ]
         roof_npcs = [
-            NPC("Phi công", (38, 5), ["Tôi chỉ liên lạc được qua bộ đàm.", "Xuống các tầng dưới, mở cổng sân và gọi tín hiệu."], reward="radio", portrait_color=YELLOW, sprite_path="Sprites/Sprites_NPC/pilot.png",
-                quest="Nhặt súng + hạ 1 zombie -> cổng xuống tầng sẽ mở"),
+            NPC("Đại úy Miller (Radio)", (38, 5), [
+                "Jax! Cậu vẫn còn sống sao? Nghe này, trực thăng không thể hạ cánh trên sảnh thượng này.",
+                "Đám quái vật bay lượn quá đông. Cậu phải xuống các tầng dưới, mở cổng sân sau để chúng tôi đón cậu.",
+                "Tìm bất cứ thứ gì có thể bắn được và bắt đầu di chuyển ngay!"
+            ], reward="radio", portrait_color=YELLOW, sprite_path="Sprites/Sprites_NPC/pilot.png",
+                quest="Thu thập trang bị và dọn dẹp lối xuống cầu thang."),
         ]
         roof_enemies = [
             (Goblin, (18, 7), "basic"),
@@ -835,8 +839,12 @@ class Game:
             ItemPickup((24, 5), "Ammo", "Đạn dự trữ từ phòng nhân sự.", "ammo", amount=18, color=WHITE),
         ]
         office_npcs = [
-            NPC("Bảo vệ Nam", (21, 17), ["Tôi giữ được phòng camera nhưng cửa đang kẹt.", "Hạ zombie đặc biệt để lấy thẻ từ, rồi khôi phục điện để mở lối xuống."], reward="map", portrait_color=BLUE, sprite_path="Sprites/Sprites_NPC/guard.png",
-                quest="Checkpoint: Hạ đủ 10 zombie -> rơi Keycard. Sau đó tìm cầu chì và bật hộp điện."),
+            NPC("An ninh Marcus", (21, 17), [
+                "Dừng lại! ...Ồ, cậu là đặc nhiệm SkyRise? May quá.",
+                "Tôi đang cố thủ ở đây, nhưng hệ thống điện đã bị chúng cắn nát.",
+                "Bọn quái vật biến dị đang giữ thẻ từ an ninh. Hạ chúng, sửa điện, và chúng ta mới có thể đi tiếp."
+            ], reward="map", portrait_color=BLUE, sprite_path="Sprites/Sprites_NPC/guard.png",
+                quest="Tiêu diệt mục tiêu để lấy thẻ từ và khôi phục nguồn điện."),
         ]
         office_enemies = [
             (Goblin, (9, 17), "basic"),
@@ -888,8 +896,12 @@ class Game:
             ItemPickup((27, 8), "Rifle Ammo", "Đạn hiếm cho súng trường.", "ammo", amount=28, color=WHITE),
         ]
         med_npcs = [
-            NPC("Y tá Linh", (18, 7), ["Tôi vẫn còn giữ được kho thuốc.", "Hạ 3 zombie đặc biệt và mở lối xuống tầng 1, tôi sẽ giúp cậu."], reward="medkit", portrait_color=GREEN, sprite_path="Sprites/Sprites_NPC/medic.png",
-                quest="Checkpoint: Hạ 3 zombie đặc biệt -> mở đường xuống tầng 1."),
+            NPC("Tiến sĩ Sarah", (18, 7), [
+                "Cẩn thận, mẫu virus này đang tiến hóa rất nhanh!",
+                "Tôi đã thu thập đủ dữ liệu, nhưng cần ra khỏi đây để bào chế thuốc giải.",
+                "Hãy dọn sạch hành lang y tế này, tôi sẽ mở khóa lối đi tắt xuống sảnh chính."
+            ], reward="medkit", portrait_color=GREEN, sprite_path="Sprites/Sprites_NPC/medic.png",
+                quest="Bảo vệ tiến sĩ và thu thập các mẫu vật tư y tế."),
         ]
         med_enemies = [
             (Mushroom, (9, 21), "tank"),
@@ -923,8 +935,12 @@ class Game:
             ItemPickup((38, 36), "Rescue Flare", "Phao sang dung de xac nhan vi tri ha canh.", "flare", color=RED),
         ]
         ground_npcs = [
-            NPC("Kỹ thuật viên Huy", (17, 18), ["Tôi giữ được bộ phát ở sân.", "Mở cổng chính, ra sân và bật beacon. Quái ngoài sân chỉ phát hiện cậu sau khi cổng mở."], reward="shortcut", portrait_color=ORANGE, sprite_path="Sprites/Sprites_NPC/engineer.png",
-                quest="Checkpoint: Mở cổng chính -> quái ngoài sân xuất hiện. Bật beacon -> trụ vững."),
+            NPC("Kỹ thuật viên Huy", (17, 18), [
+                "Cổng chính đã bị khóa chặt từ bên ngoài. Tôi cần cậu ra sân sau ngay lập tức.",
+                "Hãy bật đèn hiệu Signal Beacon ở giữa sân. Nó sẽ dẫn đường cho đội cứu hộ.",
+                "Cẩn thận, một khi cổng mở, mọi thứ bên ngoài sẽ tràn vào như một cơn lũ!"
+            ], reward="shortcut", portrait_color=ORANGE, sprite_path="Sprites/Sprites_NPC/engineer.png",
+                quest="Mở cổng sảnh chính, ra sân sau và kích hoạt đèn hiệu."),
         ]
         ground_enemies = [
             (Goblin, (18, 6), "basic"),
@@ -1084,7 +1100,11 @@ class Game:
                     ItemPickup((12, 10), "Áo giáp", "Áo giáp cũ nhưng vẫn dùng được.", "armor", amount=20, color=CYAN),
                 ],
                 [
-                    NPC("Thợ máy Dũng", (10, 26), ["Máy phát ở phòng máy bị khóa mã.", "Tìm sổ tay kỹ thuật, bật điện lên thì cửa sắt sẽ mở."], reward="shortcut", portrait_color=ORANGE, sprite_path="Sprites/Sprites_NPC/engineer.png"),
+                    NPC("Thợ máy Dũng", (10, 26), [
+                        "Nguồn điện dự phòng ở đây đã bị ngắt hoàn toàn. Cậu phải tìm mã số trong sổ tay kỹ thuật.",
+                        "Phòng máy nằm ở phía đông bắc. Nếu có điện, hệ thống cửa sắt sẽ tự động giải phóng.",
+                        "Đừng để lũ quái vật đó bao vây cậu trong bóng tối, Jax!"
+                    ], reward="shortcut", portrait_color=ORANGE, sprite_path="Sprites/Sprites_NPC/engineer.png"),
                 ],
                 [
                     (Skeleton, (22, 30), "special"),
@@ -1118,7 +1138,11 @@ class Game:
                     ItemPickup((18, 30), "Thẻ từ an ninh", "Mở cửa ra hành lang chính.", "keycard", color=BLUE),
                 ],
                 [
-                    NPC("Bác sĩ Linh", (12, 8), ["Cậu tìm thấy ống mẫu rồi sao?", "Hãy mở cửa an ninh, chúng ta cần ra khỏi đây ngay!"], reward="medkit", portrait_color=CYAN, sprite_path="Sprites/Sprites_NPC/doctor.png"),
+                    NPC("Bác sĩ Linh", (12, 8), [
+                        "Jax! Cảm ơn trời đất, cậu đã tới. Ống mẫu kháng thể này là thứ duy nhất có thể cứu được thành phố này.",
+                        "Dữ liệu của tôi cho thấy virus đang phản ứng với nhiệt độ cao. Chúng ta phải ra sảnh chính ngay!",
+                        "Tôi sẽ hỗ trợ cậu từ hệ thống điều khiển trung tâm. Đi mau!"
+                    ], reward="medkit", portrait_color=CYAN, sprite_path="Sprites/Sprites_NPC/doctor.png"),
                 ],
                 [
                     (EvilWizard, (26, 8), "ranged"),
@@ -1182,26 +1206,26 @@ class Game:
     def trailer_scenes(self):
         return [
             {
-                "title": "Thành phố đã sụp đổ",
-                "subtitle": "Virus làm biến cả khu trung tâm thành ổ zombie chỉ sau một đêm.",
+                "title": "BÌNH MINH RỰC LỬA",
+                "subtitle": "Thành phố Neon sụp đổ chỉ sau một đêm. Một loại virus lạ từ Lab 42 đã biến mọi thứ thành đống đổ nát.",
                 "accent": RED,
                 "art": [("player", 160, 360), ("eye", 590, 160), ("goblin", 770, 360)],
             },
             {
-                "title": "Tỉnh dậy trên tầng thượng",
-                "subtitle": "Bạn bị mắc kẹt giữa khói lửa, chỉ còn tiếng bộ đàm cứu hộ vọng lại.",
+                "title": "KẺ SỐNG SÓT CUỐI CÙNG",
+                "subtitle": "Bạn là Jax, đội trưởng đội đặc nhiệm bị bỏ lại trên nóc tòa tháp SkyRise. Hy vọng duy nhất là tín hiệu từ chiếc trực thăng cứu hộ.",
                 "accent": ORANGE,
                 "art": [("player", 220, 340), ("hut", 670, 340), ("eye", 760, 180)],
             },
             {
-                "title": "Xuống từng tầng, mở đường sống",
-                "subtitle": "Tìm súng, vật tư, chìa khóa và khôi phục điện để mở lối thoát.",
+                "title": "HÀNH TRÌNH XUỐNG ĐỊA NGỤC",
+                "subtitle": "Mọi tầng lầu đều là một bãi chiến trường. Tìm kiếm vũ khí, giải cứu những người bị kẹt và mở đường máu xuống sảnh chính.",
                 "accent": BLUE,
                 "art": [("player", 170, 350), ("rocket", 540, 350), ("mortar", 760, 320)],
             },
             {
-                "title": "Trụ vững tới chuyến bay cuối",
-                "subtitle": "Ra sân, bật đèn hiệu và chống lại đợt zombie cuối cùng để thoát khỏi thành phố.",
+                "title": "CHUYẾN BAY TỰ DO",
+                "subtitle": "Thời gian không còn nhiều. Kích hoạt đèn hiệu, tiêu diệt những tên gác cổng biến dị và thoát khỏi thành phố chết chóc này.",
                 "accent": YELLOW,
                 "art": [("player", 160, 360), ("mushroom", 620, 330), ("rocket", 800, 240)],
             },
@@ -2969,53 +2993,86 @@ class Game:
     def draw_intro(self):
         scenes = self.trailer_scenes()
         elapsed = pygame.time.get_ticks() - self.trailer_started_at
-        scene_duration = 3000
+        scene_duration = 5000 # Increased for better reading
         scene_index = min(len(scenes) - 1, elapsed // scene_duration)
         scene = scenes[scene_index]
+        
+        # Smooth Fade Effect between scenes
+        local_elapsed = elapsed % scene_duration
+        fade_alpha = 255
+        if local_elapsed < 500:
+            fade_alpha = int((local_elapsed / 500) * 255)
+        elif local_elapsed > scene_duration - 500:
+            fade_alpha = int(((scene_duration - local_elapsed) / 500) * 255)
 
-        self.draw_trailer_scene(scene, elapsed % scene_duration)
+        # Draw the scene content
+        self.draw_trailer_scene(scene, local_elapsed)
+        
+        # Screen fade overlay
+        if fade_alpha < 255:
+            fade_surf = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
+            fade_surf.fill(BLACK)
+            fade_surf.set_alpha(255 - fade_alpha)
+            screen.blit(fade_surf, (0, 0))
 
-        progress_width = 360
-        pygame.draw.rect(screen, (32, 36, 46), (90, 612, progress_width, 8), border_radius=4)
-        fill = int(progress_width * min(1, elapsed / (scene_duration * len(scenes))))
-        pygame.draw.rect(screen, scene["accent"], (90, 612, fill, 8), border_radius=4)
-        screen.blit(self.font.render("ENTER de bo qua trailer", True, WHITE), (90, 580))
-        screen.blit(self.font.render(f"Canh {scene_index + 1}/{len(scenes)}", True, WHITE), (470, 606))
+        # Progress & UI
+        progress_width = 400
+        progress_rect = pygame.Rect((SCREEN_WIDTH - progress_width)//2, SCREEN_HEIGHT - 60, progress_width, 6)
+        pygame.draw.rect(screen, (40, 44, 52), progress_rect, border_radius=3)
+        fill_w = int(progress_width * (elapsed / (scene_duration * len(scenes))))
+        pygame.draw.rect(screen, scene["accent"], (progress_rect.x, progress_rect.y, fill_w, 6), border_radius=3)
+        
+        skip_txt = self.font_small.render("Nhấn [ENTER] để bỏ qua", True, SOFT)
+        screen.blit(skip_txt, (progress_rect.centerx - skip_txt.get_width()//2, progress_rect.y - 30))
 
         if elapsed >= scene_duration * len(scenes):
             self.state = "playing"
 
     def draw_trailer_scene(self, scene, local_elapsed):
-        screen.fill((8, 10, 14))
+        screen.fill((5, 5, 10))
+        # Gradient background
         for y in range(SCREEN_HEIGHT):
             blend = y / SCREEN_HEIGHT
-            color = (
-                int(10 + scene["accent"][0] * 0.08 + 10 * blend),
-                int(10 + scene["accent"][1] * 0.05 + 14 * blend),
-                int(16 + scene["accent"][2] * 0.06 + 20 * blend),
-            )
-            pygame.draw.line(screen, color, (0, y), (SCREEN_WIDTH, y))
+            c = [
+                int(scene["accent"][0] * 0.1 * (1-blend)),
+                int(scene["accent"][1] * 0.1 * (1-blend)),
+                int(scene["accent"][2] * 0.1 * (1-blend))
+            ]
+            pygame.draw.line(screen, c, (0, y), (SCREEN_WIDTH, y))
 
-        offset = int((1 - min(1, local_elapsed / 900)) * 80)
-        title_shadow = self.font_title.render(scene["title"], True, BLACK)
-        screen.blit(title_shadow, (92, 82))
-        screen.blit(self.font_title.render(scene["title"], True, WHITE), (88, 78))
-        screen.blit(self.font_big.render(scene["subtitle"], True, WHITE), (92, 152))
+        # Cinematic bars
+        pygame.draw.rect(screen, BLACK, (0, 0, SCREEN_WIDTH, 80))
+        pygame.draw.rect(screen, BLACK, (0, SCREEN_HEIGHT - 80, SCREEN_WIDTH, 80))
 
+        # Title (Centralized and Dramatic)
+        title_y = 200
+        title_surf = self.font_title.render(scene["title"], True, WHITE)
+        title_rect = title_surf.get_rect(centerx=SCREEN_WIDTH//2, y=title_y)
+        
+        # Title Glow
+        glow_alpha = int(100 + 50 * math.sin(local_elapsed * 0.005))
+        title_glow = self.font_title.render(scene["title"], True, scene["accent"])
+        title_glow.set_alpha(glow_alpha)
+        screen.blit(title_glow, (title_rect.x + 4, title_rect.y + 4))
+        screen.blit(title_surf, title_rect)
+
+        # Subtitle (Typewriter-ish effect)
+        full_text = scene["subtitle"]
+        chars_to_show = int(len(full_text) * min(1, local_elapsed / 3000))
+        wrapped = wrap_text(full_text[:chars_to_show], self.font_big, SCREEN_WIDTH - 200)
+        
+        yy = 320
+        for line in wrapped:
+            txt = self.font_big.render(line, True, SOFT)
+            screen.blit(txt, (SCREEN_WIDTH//2 - txt.get_width()//2, yy))
+            yy += 45
+
+        # Art Assets with Floating Animation
         for idx, art in enumerate(scene["art"]):
             key, x, y = art
-            bob = int(math.sin((pygame.time.get_ticks() * 0.004) + idx) * 8)
-            self.draw_trailer_art(key, x, y + bob + offset)
-
-        panel = pygame.Surface((520, 150), pygame.SRCALPHA)
-        panel.fill((10, 12, 18, 170))
-        screen.blit(panel, (74, 420))
-        pygame.draw.rect(screen, scene["accent"], (74, 420, 520, 150), 2, border_radius=12)
-        lines = self.chapter.intro_lines
-        yy = 448
-        for line in lines[:2]:
-            screen.blit(self.font.render(line, True, WHITE), (96, yy))
-            yy += 34
+            bob = int(math.sin((pygame.time.get_ticks() * 0.003) + idx) * 15)
+            # Offset x based on index for variety
+            self.draw_trailer_art(key, x, y + bob + 100)
 
     def draw_trailer_art(self, key, x, y):
         """Draw specific art assets for the trailer sequence."""
@@ -3393,6 +3450,7 @@ class Game:
             self.render_world(screen)
             self.draw_sidebar()
             self.draw_overlays()
+            self.draw_mission_panel() # Added transparent mission panel
             if self.show_shop:
                 self.draw_shop()
             if self.show_backpack:
@@ -3402,6 +3460,52 @@ class Game:
         elif self.state in ["win", "lose"]:
             self.draw_end_screen()
         pygame.display.flip()
+
+    def draw_mission_panel(self):
+        """Draw a transparent mission objective panel in the top-right corner."""
+        if not self.chapter: return
+        
+        panel_w, panel_h = 320, 160
+        panel_x = SCREEN_WIDTH - SIDEBAR_WIDTH - panel_w - 20
+        panel_y = 20
+        
+        # Transparent Background
+        overlay = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+        overlay.fill((20, 24, 30, 140)) # Low alpha for transparency
+        screen.blit(overlay, (panel_x, panel_y))
+        
+        # Frame
+        pygame.draw.rect(screen, (self.chapter.chapter_color[0], self.chapter.chapter_color[1], self.chapter.chapter_color[2], 180), 
+                         (panel_x, panel_y, panel_w, panel_h), 1, border_radius=10)
+        
+        # Title
+        title_surf = self.font.render("MỤC TIÊU NHIỆM VỤ", True, YELLOW)
+        screen.blit(title_surf, (panel_x + 15, panel_y + 12))
+        pygame.draw.line(screen, YELLOW, (panel_x + 15, panel_y + 38), (panel_x + 140, panel_y + 38), 2)
+        
+        # Objectives from MissionTracker
+        if self.mission:
+            objs = self.mission.objectives()
+            yy = panel_y + 55
+            for text, completed in objs:
+                color = GREEN if completed else WHITE
+                # Checkbox
+                pygame.draw.rect(screen, color, (panel_x + 15, yy + 4, 12, 12), 1)
+                if completed:
+                    pygame.draw.rect(screen, GREEN, (panel_x + 18, yy + 7, 6, 6))
+                
+                txt_surf = self.font_small.render(text, True, color)
+                screen.blit(txt_surf, (panel_x + 35, yy))
+                yy += 28
+            
+            # Hint text
+            hint = self.chapter.quest_line if hasattr(self.chapter, "quest_line") else ""
+            if hint:
+                hint_wrapped = wrap_text(hint, self.font_small, panel_w - 30)
+                for line in hint_wrapped:
+                    h_surf = self.font_small.render(line, True, SOFT)
+                    screen.blit(h_surf, (panel_x + 15, yy))
+                    yy += 18
 
     def handle_event(self, event):
         if event.type == pygame.QUIT:
