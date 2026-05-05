@@ -594,6 +594,7 @@ class FlyingEye(Enemy):
         self.frames['attack'] = self.load_frame_sheet("Sprites/Sprites_Enemy/Flying eye/Attack.png", 150, 150, 1, 8)
         self.frames['death'] = self.load_frame_sheet("Sprites/Sprites_Enemy/Flying eye/Death.png", 150, 150, 1, 4)
         self.frames['idle'] = self.load_frame_sheet("Sprites/Sprites_Enemy/Flying eye/Flight.png", 150, 150, 1, 8)
+        self.frames['run'] = self.frames['idle']  # Flying eye uses Flight for running
         self.frames['takehit'] = self.load_frame_sheet("Sprites/Sprites_Enemy/Flying eye/Take Hit.png", 150, 150, 1, 4)
 
     def update_behavior(self, player):
@@ -1153,52 +1154,84 @@ class ZombieCommander(Mushroom):
             self.should_summon = False
         super().update(player)
 class EvilWizard(Enemy):
-    """Phap su hac am: Tan cong tu xa bang phep thuat."""
+    """Pháp sư hắc ám: Hiện đã chuyển sang cận chiến bằng gậy ma thuật."""
     def __init__(self, x, y):
-        super().__init__(x, y, speed=1.6, health=180, damage=12, acceptance_radius=400, scale=1.0)
-        self.ranged_attack_range = 450
-        self.lose_aggro_range = 700
+        # Melee stats: high damage, close range
+        super().__init__(x, y, speed=1.8, health=250, damage=25, acceptance_radius=90, scale=1.0)
+        self.lose_aggro_range = 800
         
         self.frames = {
             'idle': self.load_frame_sheet("Sprites/Sprites_Enemy/Evil Wizard/Idle.png", 250, 250, 1, 8),
             'run': self.load_frame_sheet("Sprites/Sprites_Enemy/Evil Wizard/Run.png", 250, 250, 1, 8),
             'attack': self.load_frame_sheet("Sprites/Sprites_Enemy/Evil Wizard/Attack1.png", 250, 250, 1, 8),
-            'death': self.load_frame_sheet("Sprites/Sprites_Enemy/Evil Wizard/Death.png", 250, 250, 1, 7)
+            'attack2': self.load_frame_sheet("Sprites/Sprites_Enemy/Evil Wizard/Attack2.png", 250, 250, 1, 8),
+            'death': self.load_frame_sheet("Sprites/Sprites_Enemy/Evil Wizard/Death.png", 250, 250, 1, 7),
+            'takehit': self.load_frame_sheet("Sprites/Sprites_Enemy/Evil Wizard/Take hit.png", 250, 250, 1, 3)
         }
-        # Load magic projectile image
-        try:
-            self.projectile_image = pygame.image.load("Sprites/Sprites_Effect/Bullets/21.png").convert_alpha()
-            self.projectile_image = pygame.transform.scale(self.projectile_image, (32, 32))
-        except:
-            self.projectile_image = None
+        self.attack_cooldown = 0
+        self.slash_frames = self.load_frame_sheet("Sprites/Sprites_Effect/Bullets/custom_katana_slash_clean.png", 240, 363, 1, 4)
+        self.show_slash = False
+        self.slash_timer = 0
+        self.slash_frame = 0
 
     def update_behavior(self, player):
-        """Wizard behavior: maintain distance and cast spells."""
+        """Melee wizard behavior: chase and strike."""
         distance = self.distance_to(player)
         
-        # Determine animation action
-        if distance > self.lose_aggro_range:
-            new_action = 'idle'
-        elif distance > self.ranged_attack_range:
-            new_action = 'run'
-        else:
-            new_action = 'attack'
-            
-        if new_action != self.current_action:
-            self.current_action = new_action
-            self.current_frame = 0
-            
-        # Attack logic
-        if distance <= self.ranged_attack_range:
-            self.shoot_projectile(player.x, player.y)
+        if self.attack_cooldown > 0:
+            self.attack_cooldown -= 1
 
-    def shoot_projectile(self, target_x, target_y):
-        if self.ranged_attack_cooldown <= 0:
-            super().shoot_projectile(target_x, target_y)
-            # Witchcraft effect: slow projectile but tracks slightly
-            if self.projectiles:
-                self.projectiles[-1]['speed'] = 4.5
-                self.projectiles[-1]['color'] = (180, 50, 255)
+        # Determine animation action (don't override if already attacking)
+        if self.current_action not in ['attack', 'attack2', 'takehit', 'death']:
+            # Attack check first
+            if distance < 110 and self.attack_cooldown <= 0:
+                self.current_action = random.choice(['attack', 'attack2'])
+                self.current_frame = 0
+                self.attack_cooldown = 50 # Slightly faster cooldown
+            elif distance > self.lose_aggro_range:
+                new_action = 'idle'
+            elif distance > self.acceptance_radius:
+                new_action = 'run'
+            else:
+                new_action = 'idle'
+            
+            if self.current_action not in ['attack', 'attack2'] and new_action != self.current_action:
+                self.current_action = new_action
+                self.current_frame = 0
+
+        # Apply damage mid-animation (frame 4 or 5 is usually the strike)
+        if self.current_action in ['attack', 'attack2'] and self.current_frame == 4:
+            if distance < 120: # Wider hit range for large boss sprite
+                player.health -= self.damage
+                # Trigger visual slash
+                self.show_slash = True
+                self.slash_frame = 0
+                self.slash_timer = 0
+                # Prevent multiple hits in same animation
+                self.current_frame += 1
+
+        if self.show_slash:
+            self.slash_timer += 1
+            if self.slash_timer >= 4:
+                self.slash_timer = 0
+                self.slash_frame += 1
+                if self.slash_frame >= len(self.slash_frames):
+                    self.show_slash = False
+                    self.slash_frame = 0
+
+    def draw(self, surface):
+        super().draw(surface)
+        if self.show_slash:
+            slash_img = self.slash_frames[self.slash_frame]
+            # Scale slash down a bit
+            slash_img = pygame.transform.scale(slash_img, (120, 120))
+            if not self.look_right:
+                slash_img = pygame.transform.flip(slash_img, True, False)
+            
+            # Position slash in front of wizard
+            offset_x = 45 if self.look_right else -45
+            slash_rect = slash_img.get_rect(center=(self.x + offset_x, self.y))
+            surface.blit(slash_img, slash_rect.topleft)
 
 class OldGuardian(Enemy):
     """Boss canh gac co dai: Mau cuc trau, danh can chien cuc manh."""
@@ -1211,13 +1244,97 @@ class OldGuardian(Enemy):
             'idle': self.load_frame_sheet("Sprites/Sprites_Enemy/Old_Guardian/Old_Guardian_idle.png", 120, 120, 6, 1),
             'run': self.load_frame_sheet("Sprites/Sprites_Enemy/Old_Guardian/Old_Guardian_walk.png", 120, 120, 8, 1),
             'attack': self.load_frame_sheet("Sprites/Sprites_Enemy/Old_Guardian/Old_Guardian_attack_1.png", 120, 120, 10, 1),
-            'death': self.load_frame_sheet("Sprites/Sprites_Enemy/Old_Guardian/Old_Guardian_death.png", 120, 120, 10, 1)
+            'attack2': self.load_frame_sheet("Sprites/Sprites_Enemy/Old_Guardian/Old_Guardian_attack_2.png", 120, 120, 8, 1),
+            'death': self.load_frame_sheet("Sprites/Sprites_Enemy/Old_Guardian/Old_Guardian_death.png", 120, 120, 10, 1),
+            'takehit': self.load_frame_sheet("Sprites/Sprites_Enemy/Old_Guardian/Old_Guardian_hit.png", 120, 120, 4, 1),
+            'explosion': self.load_frame_sheet("Sprites/Sprites_Enemy/Old_Guardian/explosion_effect.png", 120, 120, 7, 1)
         }
+        self.show_explosion = False
+        self.explosion_frame = 0
+        self.explosion_timer = 0
         
     def update(self, player):
         super().update(player)
-        # Boss logic: Can chien manh, co the them effect rung man hinh
-        if self.current_action == 'attack' and self.current_frame == 3:
+        # Boss logic: Can chien manh
+        if self.current_action in ['attack', 'attack2'] and self.current_frame == (len(self.frames[self.current_action]) // 2):
             dist = math.hypot(player.x - self.x, player.y - self.y)
             if dist < 120:
-                player.health -= self.damage * 0.1 # Tick damage or big hit
+                player.health -= self.damage * 0.15 # Stronger hit
+                self.show_explosion = True
+                self.explosion_frame = 0
+
+        if self.show_explosion:
+            self.explosion_timer += 1
+            if self.explosion_timer >= 5:
+                self.explosion_timer = 0
+                self.explosion_frame += 1
+                if self.explosion_frame >= len(self.frames['explosion']):
+                    self.show_explosion = False
+                    self.explosion_frame = 0
+        
+        # Randomly switch to attack2 if idle/run and in range
+        if self.current_action in ['idle', 'run']:
+            dist = math.hypot(player.x - self.x, player.y - self.y)
+            if dist < self.ranged_attack_range:
+                if random.random() < 0.05:
+                    self.current_action = random.choice(['attack', 'attack2'])
+                    self.current_frame = 0
+
+    def draw(self, surface):
+        super().draw(surface)
+        if self.show_explosion:
+            # Draw explosion at player's or contact point
+            exp_sprite = self.frames['explosion'][self.explosion_frame]
+            surface.blit(exp_sprite, exp_sprite.get_rect(center=(self.x, self.y)))
+
+class NightTerror(Enemy):
+    """Hidden Boss using Boss1-SpritSheet. Accurately sliced for 140x124 frames."""
+    def __init__(self, x, y):
+        super().__init__(x, y, speed=1.5, health=2000, damage=40, acceptance_radius=150, scale=2.5)
+        self.frames = {
+            'idle': self.load_frame_sheet("Sprites/Sprites_Enemy/Boss1-SpritSheet.png", 140, 124, 1, 8),
+            'run': self.load_frame_sheet("Sprites/Sprites_Enemy/Boss1-SpritSheet.png", 140, 124, 2, 8)[8:16],
+            'attack': self.load_frame_sheet("Sprites/Sprites_Enemy/Boss1-SpritSheet.png", 140, 124, 3, 8)[16:24],
+            'death': self.load_frame_sheet("Sprites/Sprites_Enemy/Boss1-SpritSheet.png", 140, 124, 4, 8)[24:32],
+            'takehit': self.load_frame_sheet("Sprites/Sprites_Enemy/Boss1-SpritSheet.png", 140, 124, 5, 8)[32:40]
+        }
+        self.ranged_attack_range = 300
+        
+    def update_behavior(self, player):
+        dist = self.distance_to(player)
+        if dist < self.ranged_attack_range:
+            self.current_action = 'attack'
+            if self.current_frame == 4:
+                player.health -= self.damage * 0.05
+        elif dist < 800:
+            self.current_action = 'run'
+        else:
+            self.current_action = 'idle'
+
+class ShadowWraith(Enemy):
+    """Ethereal enemy using All Characters.png. Accurately sliced for 126x125 frames."""
+    def __init__(self, x, y):
+        super().__init__(x, y, speed=2.2, health=120, damage=15, acceptance_radius=40, scale=1.0)
+        # All Characters.png (630x500) -> 5x4 grid of 126x125
+        self.frames = {
+            'idle': self.load_frame_sheet("Sprites/Sprites_Enemy/All Characters.png", 126, 125, 1, 5),
+            'run': self.load_frame_sheet("Sprites/Sprites_Enemy/All Characters.png", 126, 125, 2, 5)[5:10],
+            'attack': self.load_frame_sheet("Sprites/Sprites_Enemy/All Characters.png", 126, 125, 3, 5)[10:15],
+            'death': self.load_frame_sheet("Sprites/Sprites_Enemy/All Characters.png", 126, 125, 4, 5)[15:20]
+        }
+        self.alpha = 150 # Semi-transparent
+        
+    def draw(self, surface):
+        if self.current_action in self.frames:
+            sprite = self.frames[self.current_action][self.current_frame].copy()
+            sprite.set_alpha(self.alpha)
+            if not self.look_right:
+                sprite = pygame.transform.flip(sprite, True, False)
+            surface.blit(sprite, sprite.get_rect(center=(self.x, self.y)))
+
+    def update_behavior(self, player):
+        dist = self.distance_to(player)
+        if dist < 60:
+            self.current_action = 'attack'
+        else:
+            self.current_action = 'run'
