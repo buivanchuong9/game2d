@@ -129,6 +129,7 @@ class Enemy:
         self.frame_timer = 0
         self.frame_delay = 10  # Adjust for animation speed
         self.look_right = True
+        self.has_hit_player = False # Flag to prevent multiple hits per attack cycle
         ##For death
         self.is_dead = False
         self.is_taking_hit = False
@@ -223,10 +224,11 @@ class Enemy:
         dx, dy = player_center[0] - enemy_center[0], player_center[1] - enemy_center[1]
         distance = (dx ** 2 + dy ** 2) ** 0.5
 
-        # Reset frame index if action changes
+        # Reset frame index and hit flag if action changes
         if self.current_action != self.previous_action:
             self.current_frame = 0  # Reset animation frame
             self.previous_action = self.current_action  # Update previous action
+            self.has_hit_player = False # Reset hit flag for new action
 
         if distance > self.acceptance_radius:  # Move only if outside acceptance radius
             # Pathfinding logic: update path periodically
@@ -302,13 +304,20 @@ class Enemy:
         if self.frame_timer >= self.frame_delay:
             self.frame_timer = 0
             if self.current_action in self.frames and len(self.frames[self.current_action]) > 0:
+                old_frame = self.current_frame
                 self.current_frame = (self.current_frame + 1) % len(self.frames[self.current_action])
+                if self.current_frame < old_frame:
+                    self.has_hit_player = False
 
-                # Check collision with player
-        enemy_rect = pygame.Rect(self.x, self.y, 50, 50)
-        player_rect = pygame.Rect(player.x, player.y, 64, 64)
-        if enemy_rect.colliderect(player_rect):
-            player.health -= self.damage / 60  # Adjusting for per second damage
+                # Check collision with player only during attack animation
+        if self.current_action == 'attack' and self.current_frame == 4 and not self.has_hit_player:
+            enemy_hitbox = pygame.Rect(0, 0, 60, 60)
+            enemy_hitbox.center = (self.x, self.y)
+            player_hitbox = player.get_rect()
+            
+            if enemy_hitbox.colliderect(player_hitbox):
+                player.on_hit(self.damage)
+                self.has_hit_player = True # Only hit once per animation cycle
 
         # Decrement the ranged attack cooldown if it is active.
         if self.ranged_attack_cooldown > 0:
@@ -418,9 +427,9 @@ class Enemy:
 
             # Check collision with player
             projectile_rect = pygame.Rect(projectile['x'], projectile['y'], 10, 10)
-            player_rect = pygame.Rect(player.x, player.y, 64, 64)
+            player_rect = player.get_rect()
             if projectile_rect.colliderect(player_rect):
-                player.health -= projectile['damage']
+                player.on_hit(projectile['damage'])
                 self.projectiles.remove(projectile)
 
     def shoot_projectile(self, target_x, target_y):

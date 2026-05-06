@@ -140,15 +140,20 @@ for w in ARMORY:
     WEAPON_DROP_POOL.append(data)
 
 ITEM_SURFACES = {
-    "heal": safe_load("Sprites/Sprites_Weapon/Grenade-2.png", (24, 24)), # TODO: replace with medkit sprite
+    "heal": safe_load("Sprites/Sprites_Weapon/Grenade-2.png", (24, 24)), 
+    "bandage": safe_load("Sprites/Sprites_Weapon/Grenade-2.png", (24, 24)), 
+    "medkit": safe_load("Sprites/Sprites_Effect/Pet_Power.png", (24, 24)),
     "armor": safe_load("Sprites/Sprites_Effect/Pet_Power.png", (24, 24)),
     "ammo": safe_load("Sprites/Sprites_Weapon/Amo1.png", (20, 20)),
     "weapon": safe_load("Sprites/Sprites_Weapon/Shotgun-4.png", (34, 24)),
+    "grenade": safe_load("Sprites/Sprites_Weapon/Grenade-1.png", (24, 24)),
     "rocket_weapon": safe_load("Sprites/Sprites_Weapon/RPG-reisized.png", (38, 38)),
     # Mission items (clear icons)
     "keycard": safe_load("Sprites/Sprites_Environment/items/keycard_24.png", (24, 24)),
     "power": safe_load("Sprites/Sprites_Environment/items/fuse_24.png", (24, 24)),
     "code": safe_load("Sprites/Sprites_Environment/items/codebook_24.png", (24, 24)),
+    "map": safe_load("Sprites/Sprites_Environment/items/codebook_24.png", (24, 24)),
+    "flashlight": safe_load("Sprites/Sprites_Environment/items/fuse_24.png", (24, 24)),
     "antidote": safe_load("Sprites/Sprites_Environment/items/antidote_24.png", (24, 24)),
     "exit_key": safe_load("Sprites/Sprites_Environment/items/exit_key_24.png", (24, 24)),
     "gate": safe_load("Sprites/Sprites_Environment/items/gate_switch_24.png", (24, 24)),
@@ -542,6 +547,15 @@ class Game:
         self.pending_transition = False
         self.shop_scroll_y = 0
         self.show_backpack = False
+        self.inventory = [] # Player support items
+        # Sample items for initial testing / matches user image
+        self.inventory = [
+            {"id": "bandage", "name": "Băng gạc", "amount": 2, "type": "item"},
+            {"id": "medkit", "name": "Túi cứu thương", "amount": 1, "type": "item"},
+            {"id": "grenade", "name": "Lựu đạn nổ", "amount": 1, "type": "item"},
+            {"id": "ammo", "name": "Hộp đạn bổ sung", "amount": 2, "type": "item"},
+            {"id": "map", "name": "Bản đồ chi tiết", "desc": "Bản đồ chi tiết, detailed map: dung.", "type": "special"},
+        ]
         self.autoplay = False
         
         # Lobby Assets
@@ -1798,11 +1812,6 @@ class Game:
             self.handle_progression()
             self.check_auto_transition()
 
-            # Player hit SFX (throttled)
-            now = pygame.time.get_ticks()
-            if self.player.health < self._last_player_hp and now - self._last_player_hit_sfx_at > 120:
-                self._last_player_hit_sfx_at = now
-                sound_manager.play("nhan_vat_trung_don")
             self._last_player_hp = self.player.health
             
             if self.chapter.id == "escape" and hasattr(self, 'rescue_arrived') and self.rescue_arrived:
@@ -3440,47 +3449,159 @@ class Game:
         overlay.fill((10, 8, 12, 190))
         screen.blit(overlay, (0, 0))
         
-        panel_rect = pygame.Rect(200, 100, SCREEN_WIDTH - 400, SCREEN_HEIGHT - 200)
+        panel_rect = pygame.Rect(100, 50, SCREEN_WIDTH - 200, SCREEN_HEIGHT - 100)
         pygame.draw.rect(screen, PANEL, panel_rect, border_radius=20)
-        pygame.draw.rect(screen, CYAN, panel_rect, 2, border_radius=20)
+        pygame.draw.rect(screen, (0, 100, 100), panel_rect, 2, border_radius=20) # Darker cyan border
         
-        screen.blit(self.font_title.render("TRANG BỊ & BALO", True, CYAN), (panel_rect.x + 40, panel_rect.y + 20))
+        # Title
+        title_surf = self.font_title.render("TRANG BỊ & BALO", True, CYAN)
+        screen.blit(title_surf, (panel_rect.x + 40, panel_rect.y + 20))
         
-        # Weapons list
-        y = panel_rect.y + 100
-        for i, w in enumerate(self.weapon_manager.weapons):
-            item_rect = pygame.Rect(panel_rect.x + 40, y, panel_rect.width - 80, 70)
-            pygame.draw.rect(screen, CARD, item_rect, border_radius=12)
+        # --- Section 1: Main Weapons ---
+        section_main_y = panel_rect.y + 100
+        screen.blit(self.font.render("Vũ khí chính (Main)", True, WHITE), (panel_rect.x + 40, section_main_y))
+        
+        grid_y = section_main_y + 40
+        col_w = (panel_rect.width - 100) // 3
+        row_h = 130
+        
+        for i in range(6): # Max 6 weapons
+            r, c = i // 3, i % 3
+            slot_rect = pygame.Rect(panel_rect.x + 40 + c * (col_w + 10), grid_y + r * (row_h + 10), col_w, row_h)
             
-            # Weapon Image
-            try:
-                img = pygame.image.load(w.image_path).convert_alpha()
+            # Draw slot background
+            pygame.draw.rect(screen, (28, 32, 42), slot_rect, border_radius=10)
+            pygame.draw.rect(screen, (50, 60, 70), slot_rect, 1, border_radius=10)
+            
+            if i < len(self.weapon_manager.weapons):
+                w = self.weapon_manager.weapons[i]
+                
+                # Active weapon highlight
+                if self.weapon_manager.current_weapon == w:
+                    pygame.draw.rect(screen, YELLOW, slot_rect, 2, border_radius=10)
+                
+                # Weapon Image
+                try:
+                    img = ALL_GRAPHICS_SURFACES.get(w.image_path)
+                    if not img:
+                        # Fallback to direct load (matching shop logic)
+                        img = pygame.image.load(w.image_path).convert_alpha()
+                    
+                    if img:
+                        ratio = img.get_width() / img.get_height()
+                        target_h = 60
+                        target_w = int(target_h * ratio)
+                        if target_w > col_w - 40:
+                            target_w = col_w - 40
+                            target_h = int(target_w / ratio)
+                        img = pygame.transform.scale(img, (target_w, target_h))
+                        screen.blit(img, img.get_rect(center=(slot_rect.centerx, slot_rect.y + 50)))
+                except Exception as e:
+                    print(f"Error loading weapon image {w.image_path}: {e}")
+                
+                # Ammo Text
+                is_melee = getattr(w, "melee", False)
+                ammo_str = f"Đạn: {w.ammo_in_mag}/{w.reserve_ammo}" if not is_melee else "Vô hạn"
+                ammo_color = YELLOW if is_melee else WHITE
+                screen.blit(self.font_small.render(ammo_str, True, ammo_color), (slot_rect.x + 10, slot_rect.bottom - 30))
+                
+                # Drop Button (VỨT)
+                drop_btn = pygame.Rect(slot_rect.right - 60, slot_rect.bottom - 35, 50, 25)
+                pygame.draw.rect(screen, (200, 60, 60), drop_btn, border_radius=5)
+                screen.blit(self.font_small.render("VỨT", True, WHITE), (drop_btn.x + 8, drop_btn.y + 2))
+            else:
+                # Empty slot
+                pass
+
+        # --- Section 2: Support Items ---
+        section_support_y = grid_y + 2 * (row_h + 10) + 20
+        screen.blit(self.font.render("TRANG BỊ HỖ TRỢ & ĐỒ DÙNG", True, CYAN), (panel_rect.x + 40, section_support_y))
+        
+        items_grid_y = section_support_y + 40
+        small_slot_size = 64
+        
+        # Draw 8 small slots (4x2)
+        for i in range(8):
+            r, c = i // 4, i % 4
+            slot_rect = pygame.Rect(panel_rect.x + 40 + c * (small_slot_size + 10), items_grid_y + r * (small_slot_size + 10), small_slot_size, small_slot_size)
+            pygame.draw.rect(screen, (28, 32, 42), slot_rect, border_radius=8)
+            pygame.draw.rect(screen, (50, 60, 70), slot_rect, 1, border_radius=8)
+            
+            items_list = [it for it in self.inventory if it.get("type") == "item"]
+            if i < len(items_list):
+                it = items_list[i]
+                icon_id = it.get("id")
+                img = ITEM_SURFACES.get(icon_id if icon_id in ITEM_SURFACES else "heal")
+                if img:
+                    img = pygame.transform.scale(img, (40, 40))
+                    screen.blit(img, img.get_rect(center=slot_rect.center))
+                if it.get("amount", 0) > 1:
+                    amt_txt = self.font_small.render(f"x{it['amount']}", True, WHITE)
+                    screen.blit(amt_txt, (slot_rect.right - 25, slot_rect.bottom - 20))
+        
+        # Special slots (Large, on the right)
+        special_x = panel_rect.x + 40 + 4 * (small_slot_size + 10) + 20
+        specials = [it for it in self.inventory if it.get("type") == "special"]
+        
+        # Slot 1: Special Item (e.g. Map)
+        slot1_rect = pygame.Rect(special_x, items_grid_y, panel_rect.width - (special_x - panel_rect.x) - 40, small_slot_size)
+        pygame.draw.rect(screen, (28, 32, 42), slot1_rect, border_radius=8)
+        pygame.draw.rect(screen, (50, 60, 70), slot1_rect, 1, border_radius=8)
+        if len(specials) > 0:
+            it = specials[0]
+            img = ITEM_SURFACES.get("code" if it["id"] == "map" else "power")
+            if img:
                 img = pygame.transform.scale(img, (48, 48))
-                screen.blit(img, (item_rect.x + 12, item_rect.y + 11))
-            except: pass
+                screen.blit(img, (slot1_rect.x + 10, slot1_rect.y + 8))
+            screen.blit(self.font.render(it["name"], True, WHITE), (slot1_rect.x + 70, slot1_rect.y + 5))
+            desc_lines = wrap_text(it.get("desc", ""), self.font_small, slot1_rect.width - 160)
+            for j, line in enumerate(desc_lines[:2]):
+                screen.blit(self.font_small.render(line, True, SOFT), (slot1_rect.x + 70, slot1_rect.y + 30 + j * 18))
+            drop_btn = pygame.Rect(slot1_rect.right - 60, slot1_rect.y + 10, 50, 25)
+            pygame.draw.rect(screen, (200, 60, 60), drop_btn, border_radius=5)
+            screen.blit(self.font_small.render("VỨT", True, WHITE), (drop_btn.x + 8, drop_btn.y + 2))
+
+        # Slot 2: Current Pet
+        slot2_rect = pygame.Rect(special_x, items_grid_y + (small_slot_size + 10), panel_rect.width - (special_x - panel_rect.x) - 40, small_slot_size)
+        pygame.draw.rect(screen, (28, 32, 42), slot2_rect, border_radius=8)
+        pygame.draw.rect(screen, (50, 60, 70), slot2_rect, 1, border_radius=8)
+        
+        if self.current_pet_instance:
+            pet = self.current_pet_instance
+            # Get pet card image from shop mapping
+            pet_cards = {
+                "blue_bird": CARD_PET_BIRD, "fox": CARD_PET_FOX, "eagle": CARD_PET_EAGLE,
+                "cat_gray": CARD_PET_GRAY_CAT, "cat_orange": CARD_PET_ORANGE_CAT, "racoon": CARD_PET_RACOON,
+            }
+            img = pet_cards.get(self.current_pet_id)
+            if img:
+                # Scale card image to fit nicely
+                img = pygame.transform.scale(img, (48, 60))
+                screen.blit(img, (slot2_rect.x + 10, slot2_rect.y + 2))
             
-            # Text
-            name_txt = self.font_big.render(w.name, True, WHITE)
-            screen.blit(name_txt, (item_rect.x + 80, item_rect.y + 10))
+            screen.blit(self.font.render(f"Thú cưng: {pet.name}", True, CYAN), (slot2_rect.x + 70, slot2_rect.y + 5))
+            screen.blit(self.font_small.render(pet.description, True, SOFT), (slot2_rect.x + 70, slot2_rect.y + 32))
             
-            ammo_txt = f"Đạn: {w.ammo_in_mag}/{w.reserve_ammo}" if not getattr(w, "melee", False) else "Vô hạn"
-            screen.blit(self.font_small.render(ammo_txt, True, SOFT), (item_rect.x + 80, item_rect.y + 40))
-            
-            # Drop Button
-            drop_btn = pygame.Rect(item_rect.right - 120, item_rect.y + 15, 100, 40)
-            pygame.draw.rect(screen, (200, 60, 60), drop_btn, border_radius=8)
-            screen.blit(self.font.render("VỨT", True, WHITE), (drop_btn.x + 25, drop_btn.y + 8))
-            
-            y += 85
+            # Status badge
+            pygame.draw.rect(screen, (0, 150, 0), (slot2_rect.right - 90, slot2_rect.y + 10, 80, 25), border_radius=5)
+            screen.blit(self.font_small.render("ACTIVE", True, WHITE), (slot2_rect.right - 78, slot2_rect.y + 12))
 
     def handle_backpack_click(self, mx, my):
-        panel_rect = pygame.Rect(200, 100, SCREEN_WIDTH - 400, SCREEN_HEIGHT - 200)
-        y = panel_rect.y + 100
-        for i, w in enumerate(list(self.weapon_manager.weapons)):
-            item_rect = pygame.Rect(panel_rect.x + 40, y, panel_rect.width - 80, 70)
-            drop_btn = pygame.Rect(item_rect.right - 120, item_rect.y + 15, 100, 40)
+        panel_rect = pygame.Rect(100, 50, SCREEN_WIDTH - 200, SCREEN_HEIGHT - 100)
+        
+        # Weapons area
+        section_main_y = panel_rect.y + 100
+        grid_y = section_main_y + 40
+        col_w = (panel_rect.width - 100) // 3
+        row_h = 130
+        
+        for i in range(len(self.weapon_manager.weapons)):
+            r, c = i // 3, i % 3
+            slot_rect = pygame.Rect(panel_rect.x + 40 + c * (col_w + 10), grid_y + r * (row_h + 10), col_w, row_h)
+            drop_btn = pygame.Rect(slot_rect.right - 60, slot_rect.bottom - 35, 50, 25)
             
             if drop_btn.collidepoint(mx, my):
+                w = self.weapon_manager.weapons[i]
                 if len(self.weapon_manager.weapons) > 1:
                     self.weapon_manager.weapons.remove(w)
                     if self.weapon_manager.current_weapon == w:
@@ -3492,7 +3613,31 @@ class Game:
                     self.popup = "Không thể vứt vũ khí cuối cùng!"
                     self.popup_timer = pygame.time.get_ticks() + 1500
                 return
-            y += 85
+
+            if slot_rect.collidepoint(mx, my):
+                # Select weapon
+                self.weapon_manager.current_weapon = self.weapon_manager.weapons[i]
+                sound_manager.play("nut_bam")
+                return
+
+        # Special items area
+        section_support_y = grid_y + 2 * (row_h + 10) + 20
+        items_grid_y = section_support_y + 40
+        small_slot_size = 64
+        special_x = panel_rect.x + 40 + 4 * (small_slot_size + 10) + 20
+        
+        specials = [it for it in self.inventory if it.get("type") == "special"]
+        for i in range(len(specials)):
+            slot_rect = pygame.Rect(special_x, items_grid_y + i * (small_slot_size + 10), panel_rect.width - (special_x - panel_rect.x) - 40, small_slot_size)
+            drop_btn = pygame.Rect(slot_rect.right - 60, slot_rect.y + 10, 50, 25)
+            
+            if drop_btn.collidepoint(mx, my):
+                it = specials[i]
+                self.inventory.remove(it)
+                self.popup = f"Đã vứt: {it['name']}"
+                self.popup_timer = pygame.time.get_ticks() + 1500
+                sound_manager.play("nhat_do")
+                return
 
     def draw(self):
         screen.fill(BLACK)
