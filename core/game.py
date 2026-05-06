@@ -580,7 +580,8 @@ class Game:
             ]
         }
         
-        sound_manager.play_music("nhac_nen")
+        # Phát nhạc chờ sảnh khi khởi động
+        sound_manager.play_music("nhac_cho_sanh")
         self.set_chapter(0)
 
     def discover_map_backgrounds(self):
@@ -1249,6 +1250,9 @@ class Game:
         else:
             self.set_map_background_by_index(0)
         self.chapter = self.chapters[index]
+        # Chỉ phát nhạc chương nếu đang trong trạng thái chơi (không phải ở Menu)
+        if self.state != "menu":
+            sound_manager.play_music(f"nhac_nen_{self.chapter.id}")
         self.mission = MissionTracker(self.chapter)
         self.story_enemies = []
         self.current_blocked = set(self.chapter.blocked_tiles)
@@ -1806,10 +1810,12 @@ class Game:
                 dist_to_extract = math.hypot(self.player.x - 38*TILE_SIZE, self.player.y - 36*TILE_SIZE)
                 if dist_to_extract < 64:
                     self.state = "win"
+                    sound_manager.play_music("nhac_chien_thang")
 
             if self.player.health <= 0:
                 self.end_reason = "Bạn đã bị zombie áp đảo trước khi thoát được khỏi thành phố."
                 self.state = "lose"
+                sound_manager.play_music("nhac_that_bai")
 
     def update_frenzy(self, shot_fired):
         now = pygame.time.get_ticks()
@@ -2063,10 +2069,11 @@ class Game:
         dist = math.hypot(self.player.x - gate_cx, self.player.y - gate_cy)
         if dist <= DOOR_RADIUS:
             if self.chapter_index < len(self.chapters) - 1:
-                if not self.show_shop:
                     self.show_shop = True
                     self.pending_transition = True
                     self.shop_category = "Weapons"
+                    # Phát âm thanh qua màn
+                    sound_manager.play("qua_man")
             else:
                 # Final chapter — trigger win state
                 self.state = "win"
@@ -3584,13 +3591,18 @@ class Game:
         if self.state == "menu":
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_RETURN:
+                    sound_manager.play("nut_bam")
                     self.trailer_started_at = pygame.time.get_ticks()
                     self.state = "intro"
+                    # Bắt đầu phát nhạc chương 1 khi vào trailer/game
+                    if self.chapters:
+                        sound_manager.play_music(f"nhac_nen_{self.chapters[0].id}")
                 elif event.key in (pygame.K_LEFT, pygame.K_UP):
                     self.set_map_background_by_index(self.selected_map_index - 1)
                 elif event.key in (pygame.K_RIGHT, pygame.K_DOWN):
                     self.set_map_background_by_index(self.selected_map_index + 1)
                 elif event.key == pygame.K_h:
+                    sound_manager.play("nut_bam")
                     self.show_help = not self.show_help
             return
 
@@ -3688,10 +3700,14 @@ class Game:
                 mx, my = pygame.mouse.get_pos()
                 btns = getattr(self, "pause_buttons", {}) or {}
                 if btns.get("continue") and btns["continue"].collidepoint(mx, my):
+                    sound_manager.play("nut_bam")
                     self.state = "playing"
                 elif btns.get("menu") and btns["menu"].collidepoint(mx, my):
+                    sound_manager.play("nut_bam")
                     self.state = "menu"
+                    sound_manager.play_music("nhac_cho_sanh")
                 elif btns.get("quit") and btns["quit"].collidepoint(mx, my):
+                    sound_manager.play("nut_bam")
                     pygame.quit()
                     sys.exit()
         if event.type == pygame.MOUSEWHEEL and self.state == "playing" and self.show_shop:

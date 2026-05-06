@@ -20,13 +20,12 @@ class SoundManager:
             return
             
         # Đường dẫn gốc tới thư mục âm thanh
-        # Sử dụng đường dẫn tuyệt đối dựa trên vị trí file này
         self.base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         self.sounds_dir = os.path.join(self.base_dir, "Sounds")
         
         self.sounds = {}  # Cache cho Sound objects (SFX)
-        self.music_volume = 0.5
-        self.sfx_volume = 0.5
+        self.music_volume = 0.4
+        self.sfx_volume = 0.7
         self.current_music = None
         
         # Khởi tạo mixer nếu chưa có
@@ -37,36 +36,38 @@ class SoundManager:
         self._initialized = True
 
     def load_all_assets(self):
-        """Tự động quét và load tất cả file trong thư mục Sounds/"""
+        """Tự động quét và load tất cả file SFX trong thư mục Sounds/"""
         extensions = ('.wav', '.mp3', '.ogg')
         
         if not os.path.exists(self.sounds_dir):
             print(f"Warning: Thư mục âm thanh không tồn tại: {self.sounds_dir}")
             return
 
-        # Tìm kiếm đệ quy trong thư mục Sounds/
         search_pattern = os.path.join(self.sounds_dir, "**", "*.*")
         files = glob.glob(search_pattern, recursive=True)
         
-        loaded_count = 0
+        loaded_keys = []
         for file_path in files:
-            ext = os.path.splitext(file_path)[1].lower()
+            filename = os.path.basename(file_path)
+            ext = os.path.splitext(filename)[1].lower()
+            
             if ext in extensions:
-                # Key là tên file không có phần mở rộng (ví dụ: 'jump' cho 'jump.wav')
-                key = os.path.splitext(os.path.basename(file_path))[0]
+                key = os.path.splitext(filename)[0]
                 
+                # BỎ QUA các file nhạc nền để tránh tốn RAM và lỗi cache
+                # Nhạc nền thường bắt đầu bằng 'nhac_'
+                if key.startswith("nhac_"):
+                    continue
+
                 try:
-                    # Load SFX vào cache
-                    # Lưu ý: pygame.mixer.Sound phù hợp cho SFX ngắn.
-                    # Nhạc nền sẽ dùng pygame.mixer.music (stream từ đĩa).
                     sound = pygame.mixer.Sound(file_path)
                     sound.set_volume(self.sfx_volume)
                     self.sounds[key] = sound
-                    loaded_count += 1
+                    loaded_keys.append(key)
                 except Exception as e:
-                    print(f"Warning: Không thể load âm thanh '{file_path}': {e}")
+                    print(f"Warning: Không thể load SFX '{file_path}': {e}")
         
-        print(f"[SoundManager] Đã load {loaded_count} file âm thanh từ {self.sounds_dir}")
+        print(f"[SoundManager] Da load {len(loaded_keys)} SFX: {', '.join(loaded_keys)}")
 
     def play(self, key):
         """Chơi hiệu ứng âm thanh (SFX) bằng key"""

@@ -16,9 +16,11 @@ REQUIRED_SOUNDS = [
     # Quái vật
     "quai_chet", "quai_trung_dan",
     # Hệ thống & Vật phẩm
-    "nhat_xu", "nhat_do", "mo_cong", "hoan_thanh",
-    # Nhạc
-    "nhac_nen"
+    "nhat_xu", "nhat_do", "mo_cong", "hoan_thanh", "qua_man", "nut_bam",
+    # Nhạc theo từng màn & Nhạc chờ sảnh
+    "nhac_cho_sanh", "nhac_nen_roof", "nhac_nen_office", "nhac_nen_medical", "nhac_nen_basement", "nhac_nen_lab", "nhac_nen_ground", "nhac_nen_escape",
+    # Nhạc kết thúc
+    "nhac_chien_thang", "nhac_that_bai"
 ]
 
 def generate_dummy_wav(filepath, duration=0.1, freq=440, volume=16383):
