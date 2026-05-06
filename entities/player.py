@@ -109,6 +109,14 @@ class Player:
             if self.frame_timer >= self.frame_delay:
                 self.frame_timer = 0
                 self.current_frame = (self.current_frame + 1) % len(self.frames[self.direction])
+                
+                # Phát âm thanh bước chân khi chuyển frame (thường là frame 1 và 5 trong bộ 8 frame)
+                if self.current_frame in [1, 5]:
+                    from systems.sound_manager import sound_manager
+                    if running:
+                        sound_manager.play("nhan_vat_chay_nhanh")
+                    else:
+                        sound_manager.play("nhan_vat_chay")
         else:
             self.current_frame = 0  # Idle state resets to the first frame
 
