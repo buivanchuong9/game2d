@@ -28,7 +28,12 @@ import glob
 from dataclasses import dataclass, field
 from armory_data import ARMORY, RARITY_COLORS
 from scratch.print_map import carve
-from audio import play_bg_music, play_sound_effect
+from systems.sound_manager import sound_manager
+# VÍ DỤ SỬ DỤNG SoundManager:
+# sound_manager.play("jump")          # Chơi hiệu ứng âm thanh jump.wav/mp3
+# sound_manager.play_music("bgm")    # Chơi nhạc nền bgm.wav/mp3 (lặp)
+# sound_manager.set_music_volume(0.3) # Chỉnh âm lượng nhạc nền
+# sound_manager.stop_music()         # Dừng nhạc nền
 from data import ItemPickup, Particle, NPC, Chapter, StoryEnemy, EscortTank, MissionTracker
 
 # Định nghĩa các màu cơ bản
@@ -66,7 +71,7 @@ from entities.pet import Pet, PETS_DATA
 # --- Map props loaded HERE after display is initialized ---
 from map_props import CHAPTER_TILES, DESERT_TILE, DESERT_TILE_ALT, DESERT_WALL, DESERT_GRASS, DESERT_GRASS_TUFT, DESERT_HUT, DESERT_BIG_GRASS, DESERT_BIG_ROCK, obstacle_prop_for_tile, draw_prop
 
-from audio import SOUND_EFFECTS, SOUND_BY_BASENAME, load_sounds
+# SoundManager tự động load assets từ thư mục Sounds/
 
 # Load all graphics with absolute paths via BASE_DIR from ui.py
 from ui import BASE_DIR as _ASSET_BASE
@@ -90,7 +95,7 @@ GRID_SIZE = 44
 from shop import SHOP_CARD_SURFACES, get_random_shop_card, get_random_pet_card
 
 # Sounds loaded via audio module (centralised, absolute paths)
-load_sounds()
+# load_sounds() # Đã tự động load trong SoundManager
 
 
 from map import TILE_SIZE, GRID_SIZE
@@ -468,19 +473,21 @@ class Game:
                 wtype = "melee"
             elif "shotgun" in wname:
                 wtype = "shotgun"
+            elif "pistol" in wname:
+                wtype = "sung_luc"
             elif "sniper" in wname:
-                wtype = "sniper"
+                wtype = "tia"
             elif "smg" in wname:
-                wtype = "smg"
+                wtype = "tieu_lien"
             elif "rocket" in wname or "rpg" in wname or "b40" in wname:
-                wtype = "rocket"
+                wtype = "b40"
             else:
-                wtype = "rifle"
+                wtype = "sung_truong"
 
             if evt == "shot":
-                play_sound_effect(f"sfx_shot_{wtype}")
+                sound_manager.play(f"ban_{wtype}" if wtype != "melee" else "chem")
             elif evt in {"reload_start", "reload_complete"}:
-                play_sound_effect(f"sfx_reload_{wtype}")
+                sound_manager.play("thay_dan")
         self.weapon_manager.on_event = _weapon_event
         self.story_flags = set()
         self.exit_path = []
@@ -593,7 +600,7 @@ class Game:
         self.objective_flash_until = 0
         self.show_shop = False
         
-        play_bg_music()
+        sound_manager.play_music("nhac_nen")
         self.set_chapter(0)
 
     def discover_map_backgrounds(self):
@@ -1460,7 +1467,7 @@ class Game:
             if not it.collected and it.grid_pos == (tx, ty):
                 return False
         self.chapter.items.append(ItemPickup((tx, ty), name, description, item_type, amount=amount, color=color))
-        play_sound_effect("sfx_item_drop")
+        sound_manager.play("nhat_do")
         return True
 
     def spawn_mission_item_near(self, tile: tuple[int, int], item_type: str, name: str, description: str, color=YELLOW, radius: int = 2):
@@ -1497,7 +1504,7 @@ class Game:
 
     def collect_item(self, item):
         item.collected = True
-        play_sound_effect("sfx_item_drop")
+        sound_manager.play("nhat_do")
         self.popup = item.description
         self.popup_timer = pygame.time.get_ticks() + 2600
         if item.item_type == "weapon":
@@ -1599,7 +1606,7 @@ class Game:
             if self.chapter.id == "ground":
                 self.remove_gate_collision(self.yard_gate_tile)
                 self.spawn_particles(self.yard_gate_tile[0] * TILE_SIZE + 8, self.yard_gate_tile[1] * TILE_SIZE + 8, YELLOW, count=18)
-                play_sound_effect("sfx_gate_open")
+                sound_manager.play("mo_cong")
             else:
                 self.remove_gate_collision(item.grid_pos)
             self.queue_story_lines("Kỹ thuật viên Huy", ["Cổng sân đã mở.", "Tôi sẽ giữ hệ thống điện ổn định, cậu ra beacon đi."], ORANGE)
@@ -1775,7 +1782,7 @@ class Game:
             now = pygame.time.get_ticks()
             if self.player.health < self._last_player_hp and now - self._last_player_hit_sfx_at > 120:
                 self._last_player_hit_sfx_at = now
-                play_sound_effect("sfx_player_hit")
+                sound_manager.play("nhan_vat_trung_don")
             self._last_player_hp = self.player.health
             
             if self.chapter.id == "escape" and hasattr(self, 'rescue_arrived') and self.rescue_arrived:
@@ -1847,7 +1854,7 @@ class Game:
             cur_hp = getattr(enemy, "health", 0)
             if (not enemy.is_dead) and cur_hp < entry._last_health and now - entry._last_hit_sfx_at > 90:
                 entry._last_hit_sfx_at = now
-                play_sound_effect("sfx_enemy_hit")
+                sound_manager.play("quai_trung_dan")
             entry._last_health = cur_hp
 
             enemy.obstacle_map = self.build_obstacle_grid()
@@ -1856,7 +1863,7 @@ class Game:
             enemy.y = max(TILE_SIZE, min(enemy.y, self.world_h - TILE_SIZE))
             if enemy.is_dead and not entry.dead_registered:
                 entry.dead_registered = True
-                play_sound_effect("sfx_enemy_death")
+                sound_manager.play("quai_chet")
                 self.kill_count += 1
                 self.mission.data["zombies_killed"] += 1
                 # Stage progression hooks (linear missions)
@@ -2000,7 +2007,7 @@ class Game:
             self.current_blocked.remove(self.chapter.exit_pos)
             if self.chapter.exit_pos:
                 self.remove_gate_collision(self.chapter.exit_pos)
-            play_sound_effect("sfx_quest_complete")
+            sound_manager.play("hoan_thanh")
             self.popup = "Cổng đã mở. Chạy tới cổng để đi tiếp."
             self.popup_timer = pygame.time.get_ticks() + 3200
 
@@ -3167,7 +3174,7 @@ class Game:
                     self.apply_pet_effects()
                 
                 self.popup_timer = pygame.time.get_ticks() + 1400
-                play_sound_effect("sfx_item_drop")
+                sound_manager.play("nhat_do")
                 return
             
     def draw(self):
