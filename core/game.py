@@ -437,6 +437,19 @@ class Game:
 
             if evt == "shot":
                 sound_manager.play(f"ban_{wtype}" if wtype != "melee" else "chem")
+                # --- Screen shake / recoil per weapon type ---
+                recoil = {
+                    "melee":     (3, 80),
+                    "sung_luc":  (4, 90),
+                    "shotgun":   (9, 160),
+                    "tia":       (8, 130),
+                    "tieu_lien": (3, 70),
+                    "b40":       (14, 250),
+                    "sung_truong": (6, 110),
+                }.get(wtype, (4, 100))
+                intensity, duration = recoil
+                self.screen_shake_intensity = intensity
+                self.screen_shake_until = pygame.time.get_ticks() + duration
             elif evt in {"reload_start", "reload_complete"}:
                 sound_manager.play("thay_dan")
         self.weapon_manager.on_event = _weapon_event
@@ -456,6 +469,13 @@ class Game:
         self.frenzy_timer = 0
         self.frenzy_window_until = 0
         self.combo_shake_until = 0
+        # --- Screen FX state ---
+        self.screen_shake_x = 0          # current shake offset
+        self.screen_shake_y = 0
+        self.screen_shake_until = 0      # ms timestamp shake ends
+        self.screen_shake_intensity = 0  # pixels max
+        self.heartbeat_last = 0          # last heartbeat sfx time
+        self.heartbeat_interval = 800    # ms between beats
         # Finite wave per chapter (no infinite spawning)
         self.enemy_target_per_chapter = [10, 20, 30, 40, 50, 60, 70]
         self.enemies_remaining_to_spawn = 0
@@ -1404,10 +1424,18 @@ class Game:
         self.queue_story_dialog("Survivor", self.chapter.intro_lines[0], self.chapter.chapter_color)
 
     def build_obstacle_grid(self):
-        grid = [[False for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]
+        # Cache: only rebuild when current_blocked changes (use a frozen-set fingerprint)
+        blocked_key = id(self.current_blocked)
+        cache = getattr(self, "_obstacle_grid_cache", None)
+        cache_key = getattr(self, "_obstacle_grid_key", None)
+        if cache is not None and cache_key == blocked_key:
+            return cache
+        grid = [[False] * GRID_SIZE for _ in range(GRID_SIZE)]
         for x, y in self.current_blocked:
             if 0 <= x < GRID_SIZE and 0 <= y < GRID_SIZE:
                 grid[y][x] = True
+        self._obstacle_grid_cache = grid
+        self._obstacle_grid_key = blocked_key
         return grid
 
     def queue_story_dialog(self, speaker, text, color=CYAN):
@@ -1964,17 +1992,19 @@ class Game:
         self.enemies_remaining_to_spawn = max(0, self.enemies_remaining_to_spawn - 1)
 
     def update_enemies(self):
+        # Build obstacle grid ONCE per frame, reuse for all enemies
+        shared_obstacle_map = self.build_obstacle_grid()
+        now = pygame.time.get_ticks()
         for entry in self.story_enemies:
             enemy = entry.enemy
             # Enemy hit SFX (detect health drop since last loop)
-            now = pygame.time.get_ticks()
             cur_hp = getattr(enemy, "health", 0)
             if (not enemy.is_dead) and cur_hp < entry._last_health and now - entry._last_hit_sfx_at > 90:
                 entry._last_hit_sfx_at = now
                 sound_manager.play("quai_trung_dan")
             entry._last_health = cur_hp
 
-            enemy.obstacle_map = self.build_obstacle_grid()
+            enemy.obstacle_map = shared_obstacle_map
             enemy.update(self.player)
             enemy.x = max(TILE_SIZE, min(enemy.x, MAP_WIDTH - TILE_SIZE))
             enemy.y = max(TILE_SIZE, min(enemy.y, MAP_HEIGHT - TILE_SIZE))
@@ -2492,16 +2522,10 @@ class Game:
         surface.blit(panel, (rect.x, rect.y))
 
     def draw_darkness(self, surface):
-        """Simulate blackout: dark screen + light around player + flashlight cone."""
-        cid = self.chapter.id if self.chapter else ""
-        # Removed restriction for roof/escape to show off the effect everywhere
-        # if cid in {"roof", "escape"}:
-        #     return
-            
-        # If power restored, keep only a very subtle vignette
+        """Simulate blackout with cached surfaces for performance."""
         power_on = bool(self.mission and self.mission.data.get("power_restored", False))
-        base_alpha = 90 if power_on else 220 # High darkness for better atmosphere
-        
+        base_alpha = 90 if power_on else 220
+
         # Flicker when power is off
         if not power_on:
             t = pygame.time.get_ticks()
@@ -2510,53 +2534,61 @@ class Game:
             elif (t // 180) % 11 == 0:
                 base_alpha = 190
 
+        psx, psy = self.camera.world_to_screen(self.player.x, self.player.y)
+
+        # --- Cache the static gradient mask (only rebuild when base_alpha changes) ---
+        # The gradient mask is player-relative, so we cache by (base_alpha).
+        # Each frame we blit the cached mask at the right offset.
+        cache_key = base_alpha
+        radius = 90 if power_on else 60
+        if getattr(self, "_dark_cache_key", None) != cache_key:
+            self._dark_cache_key = cache_key
+            # Build a small radial gradient surface centred at (0,0)
+            grad_r = int(radius * 1.75) + 4   # max radius we draw
+            grad_sz = grad_r * 2 + 1
+            grad = pygame.Surface((grad_sz, grad_sz), pygame.SRCALPHA)
+            grad.fill((0, 0, 0, base_alpha))
+            cx = cy = grad_r
+            n = 30
+            for i in range(n, -1, -1):
+                frac = i / n
+                a = int(base_alpha * frac)
+                r = max(1, int(radius * (0.15 + frac * 1.6)))
+                pygame.draw.circle(grad, (0, 0, 0, a), (cx, cy), r)
+            self._dark_grad = grad
+            self._dark_grad_r = grad_r
+
+        # --- Full-screen darkness base ---
         darkness = pygame.Surface((MAP_WIDTH, MAP_HEIGHT), pygame.SRCALPHA)
         darkness.fill((0, 0, 0, base_alpha))
 
-        psx, psy = self.camera.world_to_screen(self.player.x, self.player.y)
+        # Stamp the pre-built gradient at the player position
+        gr = self._dark_grad_r
+        gx, gy = int(psx) - gr, int(psy) - gr
+        darkness.blit(self._dark_grad, (gx, gy), special_flags=pygame.BLEND_RGBA_MIN)
 
-        # light_mask starts fully dark. We paint lit regions by drawing
-        # from OUTSIDE-IN: darkest/largest shapes first, brightest/smallest last.
-        # Because pygame.draw OVERWRITES pixels, the LAST draw wins.
-        # So the bright center (alpha=0) must be drawn LAST to show through.
-        light_mask = pygame.Surface((MAP_WIDTH, MAP_HEIGHT), pygame.SRCALPHA)
-        light_mask.fill((0, 0, 0, base_alpha))
-
-        # 1. Radial Light — draw from largest+darkest ring → smallest+brightest center
-        radius = 90 if power_on else 60
-        n = 30
-        for i in range(n, -1, -1):          # i: n → 0  (outside → inside)
-            frac = i / n                     # 1.0 → 0.0
-            target_alpha = int(base_alpha * frac)          # dark → bright
-            r = max(1, int(radius * (0.15 + frac * 1.6))) # large → small
-            pygame.draw.circle(light_mask, (0, 0, 0, target_alpha), (int(psx), int(psy)), r)
-
-        # 2. Flashlight Cone — draw widest+darkest first, narrowest+brightest last
+        # --- Flashlight Cone (only when mouse is on game area) ---
         mx, my = pygame.mouse.get_pos()
-        flashlight_angle = 0
-        cone_len = 400 if power_on else 320
-        cone_width = 0.62  # radians
-
         if mx < MAP_WIDTH:
             flashlight_angle = math.atan2(my - psy, mx - psx)
-
-            num_layers = 35
-            for i in range(num_layers - 1, -1, -1):   # widest → narrowest
+            cone_len = 400 if power_on else 320
+            cone_width = 0.62
+            num_layers = 20   # reduced from 35 for performance
+            cone_mask = pygame.Surface((MAP_WIDTH, MAP_HEIGHT), pygame.SRCALPHA)
+            cone_mask.fill((0, 0, 0, base_alpha))
+            for i in range(num_layers - 1, -1, -1):
                 frac = i / num_layers
-                target_alpha = int(base_alpha * frac)  # dark → bright
+                target_alpha = int(base_alpha * frac)
                 c_width = cone_width * (0.4 + 0.6 * frac)
-
                 points = [(psx, psy)]
-                steps = 18
+                steps = 14   # reduced from 18
                 for j in range(steps + 1):
                     a = flashlight_angle - c_width / 2 + (c_width * j / steps)
                     l = cone_len * (0.9 + 0.1 * frac)
                     points.append((psx + math.cos(a) * l, psy + math.sin(a) * l))
-                pygame.draw.polygon(light_mask, (0, 0, 0, target_alpha), points)
+                pygame.draw.polygon(cone_mask, (0, 0, 0, target_alpha), points)
+            darkness.blit(cone_mask, (0, 0), special_flags=pygame.BLEND_RGBA_MIN)
 
-        # Punch the light holes: BLEND_RGBA_MIN keeps whichever pixel is darker
-        # light_mask has low alpha (transparent) in lit areas → those win → bright
-        darkness.blit(light_mask, (0, 0), special_flags=pygame.BLEND_RGBA_MIN)
         surface.blit(darkness, (0, 0))
         
         # 3. Red Eyes for enemies in the dark (only when power is off)
@@ -3035,7 +3067,87 @@ class Game:
             screen.blit(txt, (sx - txt.get_width()//2, sy))
 
         self.draw_combo_ui(screen)
+        self.draw_screen_fx(screen)
 
+    # ------------------------------------------------------------------
+    def draw_screen_fx(self, surface):
+        """Full-screen overlay effects: low-HP vignette, Frenzy aura, gun recoil shake."""
+        now = pygame.time.get_ticks()
+        w, h = surface.get_width(), surface.get_height()
+
+        # 1. Screen Shake (recoil) ----------------------------------------
+        if now < self.screen_shake_until:
+            remaining = self.screen_shake_until - now
+            factor = remaining / max(1, self.screen_shake_intensity * 20)
+            amp = int(self.screen_shake_intensity * min(1.0, factor))
+            self.screen_shake_x = random.randint(-amp, amp)
+            self.screen_shake_y = random.randint(-amp, amp)
+        else:
+            self.screen_shake_x = 0
+            self.screen_shake_y = 0
+
+        if self.screen_shake_x or self.screen_shake_y:
+            # Shift a copy of the current screen by the shake offset
+            backup = surface.copy()
+            surface.fill((0, 0, 0))
+            surface.blit(backup, (self.screen_shake_x, self.screen_shake_y))
+
+        # 2. Low HP red vignette + heartbeat --------------------------------
+        hp_ratio = self.player.health / max(1, self.player.max_health)
+        if hp_ratio < 0.35:
+            pulse = abs(math.sin(now * 0.004))
+            danger_alpha = int(60 + pulse * 100 * (1.0 - hp_ratio / 0.35))
+
+            # Cache vignette surface — rebuild only when size changes (once)
+            vig_key = (w, h)
+            if getattr(self, "_vignette_surf", None) is None or getattr(self, "_vignette_key", None) != vig_key:
+                self._vignette_key = vig_key
+                edge = max(30, int(h * 0.22))
+                vig = pygame.Surface((w, h), pygame.SRCALPHA)
+                for i in range(edge):
+                    a = int(200 * (1.0 - i / edge) ** 2)   # normalised 0-200
+                    if a <= 0:
+                        continue
+                    pygame.draw.rect(vig, (220, 20, 20, a), (0, 0, w, i + 1))
+                    pygame.draw.rect(vig, (220, 20, 20, a), (0, h - i - 1, w, i + 1))
+                    pygame.draw.rect(vig, (220, 20, 20, a), (0, 0, i + 1, h))
+                    pygame.draw.rect(vig, (220, 20, 20, a), (w - i - 1, 0, i + 1, h))
+                self._vignette_surf = vig
+
+            # Scale alpha at runtime — cheap set_alpha, no re-draw
+            self._vignette_surf.set_alpha(danger_alpha)
+            surface.blit(self._vignette_surf, (0, 0))
+
+            # Heartbeat SFX
+            interval = int(400 + 400 * hp_ratio / 0.35)
+            if now - self.heartbeat_last > interval:
+                self.heartbeat_last = now
+                sound_manager.play("nhan_vat_trung_don")
+
+        # 3. Frenzy golden aura + motion-blur lines -------------------------
+        if getattr(self, "frenzy_active", False):
+            pulse = abs(math.sin(now * 0.006))
+            # Golden border glow
+            border_alpha = int(80 + pulse * 100)
+            aura = pygame.Surface((w, h), pygame.SRCALPHA)
+            border_w = 18
+            for i in range(border_w):
+                a = int(border_alpha * (1.0 - i / border_w) ** 1.5)
+                col = (255, 200, 0, a)
+                pygame.draw.rect(aura, col, (i, i, w - 2*i, h - 2*i), 1)
+            surface.blit(aura, (0, 0))
+
+            # Motion-blur streak lines
+            streak = pygame.Surface((w, h), pygame.SRCALPHA)
+            for _ in range(8):
+                sx = random.randint(0, w)
+                sy = random.randint(0, h)
+                length = random.randint(30, 120)
+                alpha = random.randint(15, 45)
+                pygame.draw.line(streak, (255, 220, 80, alpha), (sx, sy), (sx + length, sy + random.randint(-6, 6)), 2)
+            surface.blit(streak, (0, 0))
+
+    # ------------------------------------------------------------------
     def draw_combo_ui(self, surface):
         """Draw high-fidelity persistent Combo Meter on the left."""
         if self.combo_counter < 2:
