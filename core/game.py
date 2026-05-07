@@ -2510,28 +2510,28 @@ class Game:
             elif (t // 180) % 11 == 0:
                 base_alpha = 190
 
-        # light_mask: same size as darkness, filled with base_alpha.
-        # We draw gradient shapes onto it (normal draw, no special_flags needed),
-        # then blit it onto darkness with BLEND_RGBA_MIN so low-alpha pixels in
-        # light_mask "punch" bright holes into the darkness.
-        # (pygame.draw.* does NOT support special_flags in pygame 2.6.1;
-        #  Surface.blit() DOES.)
-        light_mask = pygame.Surface((MAP_WIDTH, MAP_HEIGHT), pygame.SRCALPHA)
-        light_mask.fill((0, 0, 0, base_alpha))
-
         darkness = pygame.Surface((MAP_WIDTH, MAP_HEIGHT), pygame.SRCALPHA)
         darkness.fill((0, 0, 0, base_alpha))
 
         psx, psy = self.camera.world_to_screen(self.player.x, self.player.y)
 
-        # 1. Radial Light around player — gradient circles on light_mask
+        # light_mask starts fully dark. We paint lit regions by drawing
+        # from OUTSIDE-IN: darkest/largest shapes first, brightest/smallest last.
+        # Because pygame.draw OVERWRITES pixels, the LAST draw wins.
+        # So the bright center (alpha=0) must be drawn LAST to show through.
+        light_mask = pygame.Surface((MAP_WIDTH, MAP_HEIGHT), pygame.SRCALPHA)
+        light_mask.fill((0, 0, 0, base_alpha))
+
+        # 1. Radial Light — draw from largest+darkest ring → smallest+brightest center
         radius = 90 if power_on else 60
-        for i in range(25):
-            target_alpha = int(base_alpha * (i / 25))
-            r = int(radius * (1.0 + (25 - i) * 0.08))
+        n = 30
+        for i in range(n, -1, -1):          # i: n → 0  (outside → inside)
+            frac = i / n                     # 1.0 → 0.0
+            target_alpha = int(base_alpha * frac)          # dark → bright
+            r = max(1, int(radius * (0.15 + frac * 1.6))) # large → small
             pygame.draw.circle(light_mask, (0, 0, 0, target_alpha), (int(psx), int(psy)), r)
 
-        # 2. Flashlight Cone — gradient polygons on light_mask
+        # 2. Flashlight Cone — draw widest+darkest first, narrowest+brightest last
         mx, my = pygame.mouse.get_pos()
         flashlight_angle = 0
         cone_len = 400 if power_on else 320
@@ -2541,20 +2541,21 @@ class Game:
             flashlight_angle = math.atan2(my - psy, mx - psx)
 
             num_layers = 35
-            for i in range(num_layers):
-                target_alpha = int(base_alpha * (i / num_layers))
-                c_width = cone_width * (0.4 + 0.6 * (i / num_layers))
+            for i in range(num_layers - 1, -1, -1):   # widest → narrowest
+                frac = i / num_layers
+                target_alpha = int(base_alpha * frac)  # dark → bright
+                c_width = cone_width * (0.4 + 0.6 * frac)
 
                 points = [(psx, psy)]
                 steps = 18
                 for j in range(steps + 1):
                     a = flashlight_angle - c_width / 2 + (c_width * j / steps)
-                    l = cone_len * (1.0 - (i / num_layers) * 0.1)
+                    l = cone_len * (0.9 + 0.1 * frac)
                     points.append((psx + math.cos(a) * l, psy + math.sin(a) * l))
-
                 pygame.draw.polygon(light_mask, (0, 0, 0, target_alpha), points)
 
-        # Merge: wherever light_mask has lower alpha, it "clears" the darkness
+        # Punch the light holes: BLEND_RGBA_MIN keeps whichever pixel is darker
+        # light_mask has low alpha (transparent) in lit areas → those win → bright
         darkness.blit(light_mask, (0, 0), special_flags=pygame.BLEND_RGBA_MIN)
         surface.blit(darkness, (0, 0))
         
