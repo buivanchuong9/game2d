@@ -410,7 +410,7 @@ class WeaponManager:
         
         # Add initial weapons
         self.add_weapon("Katana", 3.0, 0.0, "Sprites/Sprites_Weapon/Katana.png", projectile_speed=0, damage=120, projectile_image={"atlas": "Sprites/Sprites_Effect/Bullets/custom_katana_slash_clean.png", "tile": (240, 363), "coords": [(0, 0), (1, 0), (2, 0), (3, 0)]}, projectile_scale=(80, 80), melee=True)
-        self.add_weapon("Pistol P1", 5.0, 0.4, "Sprites/Sprites_Weapon/Pistol-1.png", projectile_speed=12, damage=40, projectile_image="Sprites/Sprites_Effect/Bullets/01.png", projectile_scale=(36, 36))
+        self.add_weapon("Pistol P1", 5.0, 1.8, "Sprites/Sprites_Weapon/Pistol-1.png", projectile_speed=12, damage=40, projectile_image="Sprites/Sprites_Effect/Bullets/01.png", projectile_scale=(36, 36))
         
     def get_weapon(self, name):
         for weapon in self.weapons:

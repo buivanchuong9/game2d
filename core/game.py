@@ -112,6 +112,7 @@ CARD_WEAPON_GRENADE = safe_load("Shop_Cards/Card_Weapon_GrenadeLauncher.png", (7
 CARD_WEAPON_POISON = safe_load("Shop_Cards/Card_Weapon_PoisonGun.png", (72, 96))
 CARD_WEAPON_TAESAR = safe_load("Shop_Cards/Card_Weapon_Taesar_Gun.png", (72, 96))
 CARD_BORDER = safe_load("Shop_Cards/Card_Border_1.png", (78, 102))
+BULLET_ICON = safe_load("Sprites/Sprites_Effect/Bullets/bullet_icon.png", (12, 28))
 CARD_PET_BIRD = safe_load("Shop_Cards/Card_Pet_BlueBird.png", (58, 78))
 CARD_PET_FOX = safe_load("Shop_Cards/Card_Pet_Fox.png", (58, 78))
 CARD_BUILD_MORTAR = safe_load("Shop_Cards/Card_Building_SuperMortar.png", (58, 78))
@@ -2656,12 +2657,10 @@ class Game:
         rect = sprite.get_rect(center=(psx, psy))
         surface.blit(sprite, rect.topleft)
 
-        # Ammo text above player
+        # Ammo text above player removed as requested
         w = self.weapon_manager.current_weapon
         if w and not getattr(w, "melee", False):
-            ammo_text = f"{getattr(w, 'ammo_in_mag', 0)}/{getattr(w, 'reserve_ammo', 0)}"
-            label = self.font_small.render(ammo_text, True, YELLOW)
-            surface.blit(label, (psx - label.get_width() // 2, psy - 64))
+            pass # No longer drawing text above player
         
         # Draw Particles
         for p in self.particles:
@@ -2688,7 +2687,7 @@ class Game:
     def apply_pet_effects(self):
         """Apply current pet's attributes to player and game stats."""
         # Reset defaults (assuming base values)
-        self.player.speed = 5
+        self.player.speed = 2
         self.player.max_health = 300
         
         if not self.current_pet_instance:
@@ -3724,17 +3723,36 @@ class Game:
         weapon_name = self.weapon_manager.current_weapon.name
         screen.blit(self.font_small.render(f"Weapon: {weapon_name}", True, WHITE), (stat_rect.x + 16, stat_rect.y + 110))
 
-        # Skills
-        skill_rect = pygame.Rect(MAP_WIDTH + 14, 258, SIDEBAR_WIDTH - 28, 120)
-        self.draw_card(skill_rect, BLUE, title="Skills [4-6]")
-        for i, skill in enumerate(self.skill_manager.skills):
-            sx = skill_rect.x + 16 + i * 70
-            sy = skill_rect.y + 44
-            screen.blit(skill.icon, (sx, sy))
-            if not skill.can_use():
-                cd_ratio = 1 - (pygame.time.get_ticks() - skill.last_used) / skill.cooldown
-                pygame.draw.rect(screen, (0, 0, 0, 150), (sx, sy, 48, 48 * cd_ratio))
-            pygame.draw.rect(screen, WHITE, (sx, sy, 48, 48), 1)
+        # Current Weapon and Visual Ammo (Replaces Skills)
+        weapon_rect = pygame.Rect(MAP_WIDTH + 14, 258, SIDEBAR_WIDTH - 28, 120)
+        curr_w = self.weapon_manager.current_weapon
+        w_name = curr_w.name if curr_w else "No Weapon"
+        self.draw_card(weapon_rect, BLUE, title="VŨ KHÍ ĐANG DÙNG", subtitle=w_name)
+        
+        if curr_w and not getattr(curr_w, "melee", False):
+            # Draw individual bullets
+            ammo = getattr(curr_w, "ammo_in_mag", 0)
+            max_ammo = getattr(curr_w, "mag_size", 10)
+            
+            # Draw bullets in rows
+            bullet_x_start = weapon_rect.x + 16
+            bullet_y_start = weapon_rect.y + 55
+            for i in range(ammo):
+                bx = bullet_x_start + (i % 12) * 16
+                by = bullet_y_start + (i // 12) * 32
+                screen.blit(BULLET_ICON, (bx, by))
+            
+            # Show reloading status or reserve ammo
+            if getattr(curr_w, "reloading", False):
+                reload_txt = self.font.render("RELOADING...", True, RED)
+                screen.blit(reload_txt, (weapon_rect.x + 16, weapon_rect.y + 90))
+            else:
+                reserve = getattr(curr_w, "reserve_ammo", 0)
+                reserve_txt = self.font_small.render(f"DỰ TRỮ: {reserve}", True, WHITE)
+                screen.blit(reserve_txt, (weapon_rect.x + 16, weapon_rect.y + 95))
+        elif curr_w and getattr(curr_w, "melee", False):
+            melee_txt = self.font.render("VŨ KHÍ CẬN CHIẾN", True, CYAN)
+            screen.blit(melee_txt, (weapon_rect.x + 16, weapon_rect.y + 60))
 
         # Minimap
         minimap_frame = pygame.Rect(MAP_WIDTH + 14, 390, SIDEBAR_WIDTH - 28, 200)
