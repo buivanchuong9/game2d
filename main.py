@@ -45,6 +45,7 @@ BLUE = (0, 128, 255)
 CYAN = (0, 255, 255)
 YELLOW = (255, 255, 0)
 ORANGE = (255, 165, 0)
+PURPLE = (160, 32, 240)
 
 pygame.init()
 
@@ -202,11 +203,12 @@ for w in ARMORY:
     WEAPON_DROP_POOL.append(data)
 
 ITEM_SURFACES = {
-    "heal": safe_load("Sprites/Sprites_Weapon/Grenade-2.png", (24, 24)), # TODO: replace with medkit sprite
+    "heal": safe_load("Sprites/Sprites_Weapon/Grenade-2.png", (24, 24)),
     "armor": safe_load("Sprites/Sprites_Effect/Pet_Power.png", (24, 24)),
-    "ammo": safe_load("Sprites/Sprites_Weapon/Amo1.png", (20, 20)),
+    "ammo": safe_load("Sprites/Sprites_Weapon/AmoB2.png", (24, 24)),
     "weapon": safe_load("Sprites/Sprites_Weapon/Shotgun-4.png", (34, 24)),
     "rocket_weapon": safe_load("Sprites/Sprites_Weapon/RPG-reisized.png", (38, 38)),
+    "material": safe_load("Sprites/Sprites_Effect/Pet_Power.png", (28, 28)), # Shadow fragments
     # Mission items (clear icons)
     "keycard": safe_load("Sprites/Sprites_Environment/items/keycard_24.png", (24, 24)),
     "power": safe_load("Sprites/Sprites_Environment/items/fuse_24.png", (24, 24)),
@@ -218,6 +220,9 @@ ITEM_SURFACES = {
     "flare": safe_load("Sprites/Sprites_Weapon/Grenade-1.png", (24, 24)),
     "money": safe_load("Sprites/Sprites_Environment/items/money_24.png", (24, 24)),
 }
+
+# Combo multiplier system
+COMBO_TIERS = [(3, "DOUBLE KILL", 1.2), (5, "RAMPAGE!", 1.5), (10, "UNSTOPPABLE", 2.0)]
 
 
 @dataclass
@@ -231,6 +236,18 @@ class ItemPickup:
     collected: bool = False
     weapon_data: dict | None = None
     sprite_surface: pygame.Surface | None = None
+    timer: int = 0  # 0 means infinite
+    max_timer: int = 0
+
+@dataclass
+class ComboText:
+    text: str
+    x: float
+    y: float
+    life: int
+    max_life: int
+    color: tuple
+    size: int
 
 
 @dataclass
@@ -494,6 +511,10 @@ class Game:
         self.last_spawn_at = 0
         self.shot_counter = 0
         self.frenzy_window_until = 0
+        self.combo_counter = 0
+        self.combo_texts = []
+        self.frenzy_active = False
+        self.frenzy_timer = 0
         self.kill_count = 0
         self.saved_npcs = 0
         self.money = 0
@@ -1782,12 +1803,26 @@ class Game:
             self.handle_progression()
             self.check_auto_transition()
 
-            # Player hit SFX (throttled)
+            # Player hit SFX and Combo Reset
             now = pygame.time.get_ticks()
-            if self.player.health < self._last_player_hp and now - self._last_player_hit_sfx_at > 120:
-                self._last_player_hit_sfx_at = now
-                sound_manager.play("nhan_vat_trung_don")
+            if self.player.health < self._last_player_hp:
+                if now - self._last_player_hit_sfx_at > 120:
+                    self._last_player_hit_sfx_at = now
+                    sound_manager.play("nhan_vat_trung_don")
+                # Reset combo on hit
+                if self.combo_counter > 0:
+                    self.combo_counter = 0
+                    self.frenzy_active = False
+                    self.player.frenzy_active = False
+                    self.player.damage_mult = 1.0
+                    self.spawn_particles(self.player.x, self.player.y, RED, count=20)
+                    # Play a "combo break" sound effect if it was high
+                    if self.combo_counter >= 5:
+                        sound_manager.play("quai_trung_dan") 
             self._last_player_hp = self.player.health
+            
+            # Sync Frenzy state to player
+            self.player.frenzy_active = self.frenzy_active
             
             if self.chapter.id == "escape" and hasattr(self, 'rescue_arrived') and self.rescue_arrived:
                 # Kiem tra xem nguoi choi da den Helipad chua
@@ -1803,13 +1838,26 @@ class Game:
 
     def update_frenzy(self, shot_fired):
         now = pygame.time.get_ticks()
-        if shot_fired:
-            if now > self.frenzy_window_until:
-                self.shot_counter = 0
-            self.shot_counter += 1
-            self.frenzy_window_until = now + 2200
-        elif now > self.frenzy_window_until:
-            self.shot_counter = 0
+        # Combo window check
+        if now > self.frenzy_window_until and self.combo_counter > 0:
+            self.combo_counter = 0
+            self.frenzy_active = False
+            self.player.frenzy_active = False
+            self.player.damage_mult = 1.0
+
+        # Update combo texts
+        for ct in self.combo_texts[:]:
+            ct.life -= 1
+            ct.y -= 0.8 # float up
+            if ct.life <= 0:
+                self.combo_texts.remove(ct)
+        
+        # Update Item timers (fade out)
+        for it in self.chapter.items[:]:
+            if it.timer > 0:
+                it.timer -= 1
+                if it.timer <= 0:
+                    it.collected = True # Mark as collected to remove it from world
 
     def spawn_dynamic_enemies(self):
         now = pygame.time.get_ticks()
@@ -1868,21 +1916,7 @@ class Game:
             enemy.x = max(TILE_SIZE, min(enemy.x, self.world_w - TILE_SIZE))
             enemy.y = max(TILE_SIZE, min(enemy.y, self.world_h - TILE_SIZE))
             if enemy.is_dead and not entry.dead_registered:
-                entry.dead_registered = True
-                sound_manager.play("quai_chet")
-                self.kill_count += 1
-                self.mission.data["zombies_killed"] += 1
-                # Stage progression hooks (linear missions)
-                if self.chapter.id == "roof" and self.mission.data.get("weapon_collected") and self.mission.data["zombies_killed"] >= 1:
-                    self.mission.data["stage"] = max(int(self.mission.data.get("stage", 0) or 0), 2)
-                # Each kill drops 1 money (fallback to nearby free tile if death tile is blocked)
-                etile = entry.tile()
-                self.spawn_money_drop_near(etile, amount=1, radius=2)
-                if entry.archetype in {"special", "tank"}:
-                    self.mission.data["special_kills"] += 1
-                if entry.archetype == "boss":
-                    self.mission.data["boss_down"] = True
-
+                self.handle_enemy_death(entry)
                 # Mission drops to make objectives obvious
                 if self.chapter.id == "office" and not self.mission.data.get("keycard_collected", False):
                     # Guaranteed: kill 10 zombies -> keycard drops (not RNG)
@@ -1912,6 +1946,98 @@ class Game:
             entry for entry in self.story_enemies
             if not (entry.enemy.is_dead and entry.enemy.death_animation_completed)
         ]
+
+    def handle_enemy_death(self, entry):
+        entry.dead_registered = True
+        sound_manager.play("quai_chet")
+        self.kill_count += 1
+        self.mission.data["zombies_killed"] += 1
+        
+        enemy = entry.enemy
+        now = pygame.time.get_ticks()
+        etile = entry.tile()
+
+        # Combo Logic
+        self.combo_counter += 1
+        self.frenzy_window_until = now + 3000 # 3s window
+
+        # Combo Milestones Sounds
+        if self.combo_counter in [5, 15, 25]:
+            sound_manager.play("nhat_do")
+            self.combo_shake_until = now + 250
+            self.popup = f"COMBO {self.combo_counter} BREAKING!"
+            self.popup_timer = now + 1500
+        elif self.combo_counter in [10, 20, 30]:
+            sound_manager.play("hoan_thanh")
+            self.combo_shake_until = now + 500
+            self.popup = f"ULTRA COMBO {self.combo_counter}!"
+            self.popup_timer = now + 2000
+
+        # Frenzy Mode
+        if self.combo_counter >= 3:
+            self.frenzy_active = True
+            # Apply damage buff
+            self.player.damage_mult = 1.2
+            
+        # Combo Visual
+        tier_text = ""
+        reward_mult = 1.0
+        for threshold, label, mult in COMBO_TIERS:
+            if self.combo_counter >= threshold:
+                tier_text = label
+                reward_mult = mult
+        
+        display_text = f"{self.combo_counter} COMBO"
+        if tier_text and self.combo_counter in [3, 5, 10]:
+            display_text = f"{tier_text}!"
+
+        self.combo_texts.append(ComboText(
+            display_text,
+            enemy.x, enemy.y - 40,
+            life=60, max_life=60,
+            color=YELLOW if self.combo_counter < 5 else ORANGE if self.combo_counter < 10 else RED,
+            size=20 + min(self.combo_counter * 2, 20)
+        ))
+
+        # Loot Drop
+        roll = random.random()
+        if entry.archetype in {"special", "tank", "boss"}:
+            # Guaranteed drop for specials
+            if type(enemy).__name__ == "ShadowWraith":
+                self.spawn_loot_at(etile, "material", "Mảnh bóng tối", "Nguyên liệu quý từ ShadowWraith.", color=PURPLE)
+            else:
+                # Other specials drop something nice
+                self.spawn_loot_at(etile, "weapon_drop", "Vũ khí", "Rơi từ quái mạnh.", color=ORANGE)
+            self.mission.data["special_kills"] += 1
+            if entry.archetype == "boss":
+                self.mission.data["boss_down"] = True
+        else:
+            if roll < 0.30: # 30% Money
+                amount = int(random.randint(1, 3) * reward_mult)
+                self.spawn_loot_at(etile, "money", "Tiền", f"+{amount} tiền rơi ra.", amount=amount, color=YELLOW)
+            elif roll < 0.40: # 10% Ammo
+                amount = random.randint(5, 12)
+                self.spawn_loot_at(etile, "ammo", "Đạn", f"Nhặt {amount} viên đạn.", amount=amount, color=CYAN)
+            elif roll < 0.45: # 5% Medkit
+                self.spawn_loot_at(etile, "heal", "Medkit nhỏ", "Hồi 20 HP.", amount=20, color=GREEN)
+
+        # Stage progression hooks
+        if self.chapter.id == "roof" and self.mission.data.get("weapon_collected") and self.mission.data["zombies_killed"] >= 1:
+            self.mission.data["stage"] = max(int(self.mission.data.get("stage", 0) or 0), 2)
+
+    def spawn_loot_at(self, tile, item_type, name, description, amount=0, color=WHITE):
+        """Spawn a temporary loot item that fades away."""
+        # Ensure tile is valid
+        tx, ty = tile
+        if not (1 <= tx < GRID_SIZE - 1 and 1 <= ty < GRID_SIZE - 1): return
+        if (tx, ty) in self.current_blocked: return
+        
+        item = ItemPickup(
+            (tx, ty), name, description, item_type, 
+            amount=amount, color=color, 
+            timer=360, max_timer=360 # 6 seconds at 60fps
+        )
+        self.chapter.items.append(item)
 
     def _trigger_clear_dialog_if_ready(self):
         # When all enemies are dead and no more are allowed to spawn, play story chat
@@ -2408,23 +2534,55 @@ class Game:
             if item.collected: continue
             if self.camera.is_visible(item.grid_pos[0]*TILE_SIZE, item.grid_pos[1]*TILE_SIZE):
                 sx, sy = self.camera.world_to_screen(item.grid_pos[0]*TILE_SIZE, item.grid_pos[1]*TILE_SIZE)
+                
+                # Fade logic
+                alpha = 255
+                if item.timer > 0:
+                    alpha = int(255 * (item.timer / item.max_timer))
+                
+                # Bobbing animation for loot
+                bob = int(math.sin(pygame.time.get_ticks() * 0.01 + item.grid_pos[0] * 10) * 4)
+                sy += bob
+
                 mission_types = {"keycard", "power", "code", "antidote", "exit", "exit_key", "gate", "signal"}
                 is_mission = item.item_type in mission_types
-                if is_mission or item.item_type == "weapon_drop":
+                if is_mission or item.item_type == "weapon_drop" or item.item_type == "material":
                     pulse = 10 + int(abs(math.sin(pygame.time.get_ticks() * 0.01)) * 6)
-                    ring_col = (255, 220, 80) if is_mission else item.color
-                    pygame.draw.circle(surface, ring_col, (sx + 8, sy + 8), pulse, 2)
+                    # Unique color for Shadow Fragments
+                    ring_col = (180, 0, 255) if item.item_type == "material" else (255, 220, 80) if is_mission else item.color
+                    # Handle alpha for circles
+                    if alpha < 255:
+                        s = pygame.Surface((pulse*2+4, pulse*2+4), pygame.SRCALPHA)
+                        pygame.draw.circle(s, (*ring_col, alpha), (pulse+2, pulse+2), pulse, 2)
+                        surface.blit(s, (sx + 8 - (pulse+2), sy + 8 - (pulse+2)))
+                    else:
+                        pygame.draw.circle(surface, ring_col, (sx + 8, sy + 8), pulse, 2)
+                    
                     # Name label
-                    label_col = YELLOW if is_mission else item.color
+                    label_col = (200, 100, 255) if item.item_type == "material" else YELLOW if is_mission else item.color
                     label = self.font_small.render(item.name, True, label_col)
+                    if alpha < 255: label.set_alpha(alpha)
                     surface.blit(label, (sx - 4, sy - 14))
-                if item.sprite_surface:
-                    surface.blit(item.sprite_surface, (sx, sy))
-                else:
-                    # Fallback if no sprite
+                
+                sprite = item.sprite_surface
+                if not sprite:
                     sprite = ITEM_SURFACES.get(item.item_type)
-                    if sprite:
-                        surface.blit(sprite, (sx, sy))
+                
+                if sprite:
+                    if item.item_type == "material":
+                        # Tint material purple
+                        sprite = sprite.copy()
+                        sprite.fill((200, 100, 255), special_flags=pygame.BLEND_RGB_MULT)
+                    
+                    if alpha < 255:
+                        sprite = sprite.copy()
+                        sprite.set_alpha(alpha)
+                    surface.blit(sprite, (sx, sy))
+                else:
+                    if alpha < 255:
+                        s = pygame.Surface((16, 16), pygame.SRCALPHA)
+                        pygame.draw.circle(s, (*item.color, alpha), (8, 8), 6)
+                        surface.blit(s, (sx, sy))
                     else:
                         pygame.draw.circle(surface, item.color, (sx+8, sy+8), 6)
                     
@@ -2484,6 +2642,17 @@ class Game:
             pulse = 10 + int(abs(math.sin(pygame.time.get_ticks() * 0.01)) * 8)
             pygame.draw.circle(surface, YELLOW, (gsx, gsy), pulse, 2)
             pygame.draw.circle(surface, WHITE, (gsx, gsy), 4)
+            
+        # Draw Combo Texts
+        for ct in self.combo_texts:
+            sx, sy = self.camera.world_to_screen(ct.x, ct.y)
+            alpha = int(255 * (ct.life / ct.max_life))
+            font = self.font if ct.size <= 24 else self.font_big
+            lines = ct.text.split("\n")
+            for i, line in enumerate(lines):
+                txt_surf = font.render(line, True, ct.color)
+                txt_surf.set_alpha(alpha)
+                surface.blit(txt_surf, (sx - txt_surf.get_width() // 2, sy - txt_surf.get_height() // 2 + i * 25))
             
         self.draw_world_fx(surface)
 
@@ -2754,6 +2923,87 @@ class Game:
             self.draw_dialog()
         if self.show_map:
             self.draw_full_map()
+        
+        self.draw_combo_ui(screen)
+
+    def draw_combo_ui(self, surface):
+        """Draw high-fidelity persistent Combo Meter on the left."""
+        if self.combo_counter < 2:
+            return
+            
+        x, y = 30, 220
+        now = pygame.time.get_ticks()
+        
+        # Shake effect on milestone
+        shake_x = 0
+        if now < getattr(self, "combo_shake_until", 0):
+            shake_x = random.randint(-8, 8)
+            
+        # Background Pulse Glow / Fire Effect
+        glow_alpha = 120 + int(math.sin(now * 0.01) * 40)
+        if self.combo_counter >= 15:
+            glow_col = (255, 60, 0, glow_alpha)
+        elif self.combo_counter >= 5:
+            glow_col = (255, 150, 0, glow_alpha)
+        else:
+            glow_col = (200, 200, 220, glow_alpha)
+        
+        glow_width = 160 + min(self.combo_counter * 4, 100)
+        glow_surf = pygame.Surface((glow_width, 110), pygame.SRCALPHA)
+        pygame.draw.ellipse(glow_surf, glow_col, (0, 0, glow_width, 110))
+        
+        # Add dynamic "sparks" for high combo
+        if self.combo_counter >= 10:
+            for _ in range(int(self.combo_counter / 5)):
+                sx_pos = random.randint(0, glow_width)
+                sy_pos = random.randint(0, 110)
+                pygame.draw.circle(glow_surf, (255, 220, 100, 150), (sx_pos, sy_pos), random.randint(2, 6))
+                
+        surface.blit(glow_surf, (x - 40 + shake_x, y - 30))
+        
+        # Combo Count Text (X15)
+        combo_str = f"X{self.combo_counter}"
+        font = self.font_title if self.combo_counter >= 10 else self.font_big
+        
+        # Premium Stroke / Shadow
+        stroke_col = (30, 5, 0)
+        for dx, dy in [(-3,-3), (3,-3), (-3,3), (3,3), (0, 4)]:
+            surface.blit(font.render(combo_str, True, stroke_col), (x + dx + shake_x, y + dy))
+            
+        # Pulsing Main Text Color
+        if self.combo_counter >= 20:
+            # Fire cycle
+            t = (now // 100) % 3
+            main_col = [RED, ORANGE, YELLOW][t]
+        elif self.combo_counter >= 10:
+            main_col = ORANGE
+        else:
+            main_col = WHITE
+            
+        txt_surf = font.render(combo_str, True, main_col)
+        surface.blit(txt_surf, (x + shake_x, y))
+        
+        # Progress Bar (Timer)
+        time_left = max(0, self.frenzy_window_until - now)
+        bar_w = 140
+        fill_w = int(bar_w * (time_left / 3000))
+        
+        # Bar Container
+        pygame.draw.rect(surface, (10, 10, 15, 200), (x, y + 85, bar_w, 12), border_radius=6)
+        pygame.draw.rect(surface, (60, 60, 70), (x, y + 85, bar_w, 12), 2, border_radius=6)
+        
+        # Animated Fill
+        if fill_w > 0:
+            fill_col = RED if time_left < 1000 else ORANGE if self.combo_counter >= 10 else BLUE
+            pygame.draw.rect(surface, fill_col, (x + 2, y + 87, fill_w - 4, 8), border_radius=4)
+            # Add a "shine" to the bar
+            if fill_w > 10:
+                pygame.draw.rect(surface, (255, 255, 255, 100), (x + 2, y + 87, fill_w - 4, 3), border_radius=2)
+            
+        # Label
+        label_txt = "FRENZY STATUS" if self.combo_counter >= 3 else "COMBO WINDOW"
+        label_col = RED if self.combo_counter >= 10 else YELLOW if self.combo_counter >= 3 else SOFT
+        surface.blit(self.font_small.render(label_txt, True, label_col), (x + 2, y + 100))
 
     def draw_dialog(self):
         # Genshin-like cinematic dialog box

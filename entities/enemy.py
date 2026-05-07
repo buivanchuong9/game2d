@@ -737,11 +737,27 @@ class Mushroom(Enemy):
         self.frames['takehit'] = self.load_frame_sheet("Sprites/Sprites_Enemy/Mushroom/Take Hit.png", 150, 150, 1, 4)
 
     def update_behavior(self, player):
-        """Mushrooms chase and attack when close."""
+        """Mushrooms chase and attack when close with hysteresis to prevent flickering."""
         distance = ((player.x - self.x) ** 2 + (player.y - self.y) ** 2) ** 0.5
-        new_action = 'run' if distance > 150 else 'idle' if distance > self.acceptance_radius else 'attack'
+        
+        # Hysteresis buffer
+        buffer = 20
+        if self.current_action == 'run':
+            if distance < 150 - buffer:
+                new_action = 'idle' if distance > self.acceptance_radius else 'attack'
+            else:
+                new_action = 'run'
+        elif self.current_action == 'idle':
+            if distance > 150 + buffer:
+                new_action = 'run'
+            elif distance < self.acceptance_radius:
+                new_action = 'attack'
+            else:
+                new_action = 'idle'
+        else:
+            new_action = 'run' if distance > 150 else 'idle' if distance > self.acceptance_radius else 'attack'
 
-        if new_action != self.current_action:  # Only change if different
+        if new_action != self.current_action:
             self.current_action = new_action
             self.current_frame = 0  # Reset animation frame
 
@@ -778,8 +794,9 @@ class Skeleton(Enemy):
             self.current_frame = 0
 
     def update_behavior(self, player):
+        """Skeleton behavior with hysteresis to prevent flickering."""
         distance = ((player.x - self.x) ** 2 + (player.y - self.y) ** 2) ** 0.5
-
+        
         if self.shield_active:
             self.shield_timer -= 1
             if self.shield_timer <= 0:
@@ -791,8 +808,24 @@ class Skeleton(Enemy):
             self.shield_cooldown_timer -= 1
         elif self.health < 50 and random.random() < 0.1:
             self.activate_shield()
+            return
 
-        new_action = 'run' if distance > 150 else 'idle' if distance > self.acceptance_radius else 'attack'
+        buffer = 20
+        if self.current_action == 'run':
+            if distance < 150 - buffer:
+                new_action = 'idle' if distance > self.acceptance_radius else 'attack'
+            else:
+                new_action = 'run'
+        elif self.current_action == 'idle':
+            if distance > 150 + buffer:
+                new_action = 'run'
+            elif distance < self.acceptance_radius:
+                new_action = 'attack'
+            else:
+                new_action = 'idle'
+        else:
+            new_action = 'run' if distance > 150 else 'idle' if distance > self.acceptance_radius else 'attack'
+
         if new_action != self.current_action:
             self.current_action = new_action
             self.current_frame = 0
@@ -1208,16 +1241,24 @@ class EvilWizard(Enemy):
                 self.current_action = random.choice(['attack', 'attack2'])
                 self.current_frame = 0
                 self.attack_cooldown = 50 # Slightly faster cooldown
-            elif distance > self.lose_aggro_range:
-                new_action = 'idle'
-            elif distance > self.acceptance_radius:
-                new_action = 'run'
             else:
-                new_action = 'idle'
-            
-            if self.current_action not in ['attack', 'attack2'] and new_action != self.current_action:
-                self.current_action = new_action
-                self.current_frame = 0
+                buffer = 20
+                if self.current_action == 'run':
+                    if distance < self.acceptance_radius - buffer:
+                        new_action = 'idle'
+                    else:
+                        new_action = 'run'
+                elif self.current_action == 'idle':
+                    if distance > self.acceptance_radius + buffer:
+                        new_action = 'run'
+                    else:
+                        new_action = 'idle'
+                else:
+                    new_action = 'run' if distance > self.acceptance_radius else 'idle'
+
+                if new_action != self.current_action:
+                    self.current_action = new_action
+                    self.current_frame = 0
 
         # Apply damage mid-animation (frame 4 or 5 is usually the strike)
         if self.current_action in ['attack', 'attack2'] and self.current_frame == 4:
@@ -1311,12 +1352,13 @@ class NightTerror(Enemy):
     """Hidden Boss using Boss1-SpritSheet. Accurately sliced for 140x124 frames."""
     def __init__(self, x, y):
         super().__init__(x, y, speed=1.5, health=2000, damage=40, acceptance_radius=150, scale=2.5)
+        # Boss1-SpritSheet.png (1120x744) -> 8x8 grid of 140x93
         self.frames = {
-            'idle': self.load_frame_sheet("Sprites/Sprites_Enemy/Boss1-SpritSheet.png", 140, 124, 1, 8),
-            'run': self.load_frame_sheet("Sprites/Sprites_Enemy/Boss1-SpritSheet.png", 140, 124, 2, 8)[8:16],
-            'attack': self.load_frame_sheet("Sprites/Sprites_Enemy/Boss1-SpritSheet.png", 140, 124, 3, 8)[16:24],
-            'death': self.load_frame_sheet("Sprites/Sprites_Enemy/Boss1-SpritSheet.png", 140, 124, 4, 8)[24:32],
-            'takehit': self.load_frame_sheet("Sprites/Sprites_Enemy/Boss1-SpritSheet.png", 140, 124, 5, 8)[32:40]
+            'idle': self.load_frame_sheet("Sprites/Sprites_Enemy/Boss1-SpritSheet.png", 140, 93, 1, 8),
+            'run': self.load_frame_sheet("Sprites/Sprites_Enemy/Boss1-SpritSheet.png", 140, 93, 2, 8)[8:16],
+            'attack': self.load_frame_sheet("Sprites/Sprites_Enemy/Boss1-SpritSheet.png", 140, 93, 3, 8)[16:24],
+            'death': self.load_frame_sheet("Sprites/Sprites_Enemy/Boss1-SpritSheet.png", 140, 93, 4, 8)[24:32],
+            'takehit': self.load_frame_sheet("Sprites/Sprites_Enemy/Boss1-SpritSheet.png", 140, 93, 5, 8)[32:40]
         }
         self.ranged_attack_range = 300
         
@@ -1335,12 +1377,12 @@ class ShadowWraith(Enemy):
     """Ethereal enemy using All Characters.png. Accurately sliced for 126x125 frames."""
     def __init__(self, x, y):
         super().__init__(x, y, speed=2.2, health=120, damage=15, acceptance_radius=40, scale=1.0)
-        # All Characters.png (630x500) -> 5x4 grid of 126x125
+        # All Characters.png (630x500) -> 5x5 grid of 126x100
         self.frames = {
-            'idle': self.load_frame_sheet("Sprites/Sprites_Enemy/All Characters.png", 126, 125, 1, 5),
-            'run': self.load_frame_sheet("Sprites/Sprites_Enemy/All Characters.png", 126, 125, 2, 5)[5:10],
-            'attack': self.load_frame_sheet("Sprites/Sprites_Enemy/All Characters.png", 126, 125, 3, 5)[10:15],
-            'death': self.load_frame_sheet("Sprites/Sprites_Enemy/All Characters.png", 126, 125, 4, 5)[15:20]
+            'idle': self.load_frame_sheet("Sprites/Sprites_Enemy/All Characters.png", 126, 100, 1, 5),
+            'run': self.load_frame_sheet("Sprites/Sprites_Enemy/All Characters.png", 126, 100, 2, 5)[5:10],
+            'attack': self.load_frame_sheet("Sprites/Sprites_Enemy/All Characters.png", 126, 100, 3, 5)[10:15],
+            'death': self.load_frame_sheet("Sprites/Sprites_Enemy/All Characters.png", 126, 100, 4, 5)[15:20]
         }
         self.alpha = 150 # Semi-transparent
         
