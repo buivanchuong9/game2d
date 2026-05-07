@@ -40,37 +40,37 @@ def fire_row(row: int, count: int = 8):
 
 ARMORY = [
     # --- PISTOLS ---
-    _mk("Pistol P1", "pistol", "Pistol-1.png", 5.0, 0.4, 12, 40, proj=fire_row(0)),
-    _mk("Pistol P2", "pistol", "Pistol-2.png", 5.5, 0.4, 12, 45, proj=fire_row(1), rarity="rare"),
-    _mk("Pistol P3", "pistol", "Pistol-3.png", 6.0, 0.3, 13, 50, proj=fire_row(2), rarity="rare"),
-    _mk("Pistol Elite", "pistol", "Pistol-5.png", 7.0, 0.3, 14, 60, proj=fire_row(3), rarity="epic"),
+    _mk("Pistol P1", "pistol", "Pistol-1.png", 5.0, 1.8, 12, 40, proj=fire_row(0)),
+    _mk("Pistol P2", "pistol", "Pistol-2.png", 5.5, 1.8, 12, 45, proj=fire_row(1), rarity="rare"),
+    _mk("Pistol P3", "pistol", "Pistol-3.png", 6.0, 1.5, 13, 50, proj=fire_row(2), rarity="rare"),
+    _mk("Pistol Elite", "pistol", "Pistol-5.png", 7.0, 1.5, 14, 60, proj=fire_row(3), rarity="epic"),
 
     # --- RIFLES ---
-    _mk("Assault Rifle A1", "rifle", "Assaut-rifle-1.png", 8.0, 0.5, 14, 55, proj=fire_row(4)),
-    _mk("Assault Rifle A2", "rifle", "Assaut-rifle-2.png", 8.5, 0.5, 14, 60, proj=fire_row(5), rarity="rare"),
-    _mk("Tactical Rifle", "rifle", "Assaut-rifle-3-scoped.png", 9.0, 0.4, 15, 70, proj=fire_row(6), rarity="rare"),
-    _mk("Heavy Rifle", "rifle", "Assaut-rifle-4.png", 7.5, 0.6, 13, 85, proj=fire_row(7), rarity="epic"),
+    _mk("Assault Rifle A1", "rifle", "Assaut-rifle-1.png", 8.0, 2.5, 14, 55, proj=fire_row(4)),
+    _mk("Assault Rifle A2", "rifle", "Assaut-rifle-2.png", 8.5, 2.5, 14, 60, proj=fire_row(5), rarity="rare"),
+    _mk("Tactical Rifle", "rifle", "Assaut-rifle-3-scoped.png", 9.0, 2.2, 15, 70, proj=fire_row(6), rarity="rare"),
+    _mk("Heavy Rifle", "rifle", "Assaut-rifle-4.png", 7.5, 3.0, 13, 85, proj=fire_row(7), rarity="epic"),
 
     # --- SMGs ---
-    _mk("SMG S1", "smg", "SMG-1.png", 11.0, 0.4, 15, 30, proj=fire_row(8)),
-    _mk("SMG S2", "smg", "SMG-2.png", 12.0, 0.4, 15, 35, proj=fire_row(9), rarity="rare"),
-    _mk("Rapid SMG", "smg", "SMG-4.png", 14.0, 0.3, 16, 40, proj=fire_row(10), rarity="epic"),
+    _mk("SMG S1", "smg", "SMG-1.png", 11.0, 1.8, 15, 30, proj=fire_row(8)),
+    _mk("SMG S2", "smg", "SMG-2.png", 12.0, 1.8, 15, 35, proj=fire_row(9), rarity="rare"),
+    _mk("Rapid SMG", "smg", "SMG-4.png", 14.0, 1.5, 16, 40, proj=fire_row(10), rarity="epic"),
 
     # --- SHOTGUNS ---
-    _mk("Shotgun X1", "shotgun", "Shotgun-1.png", 2.0, 0.6, 10, 120, proj=fire_row(11), scale=(40, 40)),
-    _mk("Shotgun X2", "shotgun", "Shotgun-2.png", 2.2, 0.6, 10, 140, proj=fire_row(12), scale=(40, 40), rarity="rare"),
-    _mk("Heavy Shotgun", "shotgun", "Shotgun-4.png", 2.5, 0.5, 11, 160, proj=fire_row(13), scale=(45, 45), rarity="epic"),
+    _mk("Shotgun X1", "shotgun", "Shotgun-1.png", 2.0, 2.8, 10, 120, proj=fire_row(11), scale=(40, 40)),
+    _mk("Shotgun X2", "shotgun", "Shotgun-2.png", 2.2, 2.8, 10, 140, proj=fire_row(12), scale=(40, 40), rarity="rare"),
+    _mk("Heavy Shotgun", "shotgun", "Shotgun-4.png", 2.5, 2.5, 11, 160, proj=fire_row(13), scale=(45, 45), rarity="epic"),
 
     # --- SNIPERS ---
-    _mk("Sniper R1", "sniper", "Sniper-rifle-1.png", 1.2, 0.8, 20, 200, proj=fire_row(14), scale=(50, 50)),
-    _mk("Sniper R2", "sniper", "Sniper-rifle-2-scoped.png", 1.3, 0.8, 22, 230, proj=fire_row(15), scale=(50, 50), rarity="rare"),
-    _mk("Modern Sniper", "sniper", "Sniper-rifle-4-scoped.png", 1.5, 0.7, 25, 280, proj=fire_row(16), scale=(55, 55), rarity="epic"),
+    _mk("Sniper R1", "sniper", "Sniper-rifle-1.png", 1.2, 3.5, 20, 200, proj=fire_row(14), scale=(50, 50)),
+    _mk("Sniper R2", "sniper", "Sniper-rifle-2-scoped.png", 1.3, 3.5, 22, 230, proj=fire_row(15), scale=(50, 50), rarity="rare"),
+    _mk("Modern Sniper", "sniper", "Sniper-rifle-4-scoped.png", 1.5, 3.0, 25, 280, proj=fire_row(16), scale=(55, 55), rarity="epic"),
 
     # --- HEAVY / SPECIAL ---
-    _mk("Grenade Launcher", "grenade_launcher", "grenade launcher.png", 1.5, 0.8, 8, 150, proj=fire_row(17), radius=80, scale=(40, 40), rarity="rare"),
-    _mk("Bazooka", "rocket", "Bazooka.png", 1.0, 1.2, 7, 300, proj=fire_row(18), radius=120, scale=(60, 60), rarity="epic"),
-    _mk("RPG-7", "rocket", "RPG.png", 0.8, 1.5, 6, 400, proj=fire_row(19), radius=150, scale=(70, 70), rarity="epic"),
-    _mk("Plasma Cannon", "taesar", "PlasmaGun.png", 4.0, 0.6, 14, 90, proj=fire_row(20), scale=(40, 40), rarity="epic"),
+    _mk("Grenade Launcher", "grenade_launcher", "grenade launcher.png", 1.5, 3.5, 8, 150, proj=fire_row(17), radius=80, scale=(40, 40), rarity="rare"),
+    _mk("Bazooka", "rocket", "Bazooka.png", 1.0, 4.5, 7, 300, proj=fire_row(18), radius=120, scale=(60, 60), rarity="epic"),
+    _mk("RPG-7", "rocket", "RPG.png", 0.8, 5.0, 6, 400, proj=fire_row(19), radius=150, scale=(70, 70), rarity="epic"),
+    _mk("Plasma Cannon", "taesar", "PlasmaGun.png", 4.0, 2.6, 14, 90, proj=fire_row(20), scale=(40, 40), rarity="epic"),
 
     # --- MELEE ---
     {

@@ -7,7 +7,7 @@ class Player:
     def __init__(self, x, y):
         self.x = x
         self.y = y
-        self.speed = 4  # Reduced base speed from 5
+        self.speed = 2  # Reduced base speed from 5
         self.dx = 0
         self.dy = 0
         self.health = 300
