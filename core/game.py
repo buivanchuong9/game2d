@@ -558,19 +558,6 @@ class Game:
         ]
         self.autoplay = False
         
-        # Lobby Assets
-        self.lobby_bg = safe_load("Sprites/lobby_background.png", (SCREEN_WIDTH, SCREEN_HEIGHT))
-        self.menu_start_time = pygame.time.get_ticks()
-        self.menu_particles = []
-        for _ in range(40):
-            self.menu_particles.append({
-                "x": random.randint(0, SCREEN_WIDTH),
-                "y": random.randint(0, SCREEN_HEIGHT),
-                "speed": random.uniform(0.5, 2.0),
-                "size": random.randint(1, 3),
-                "alpha": random.randint(50, 200)
-            })
-        
         # Weapons are generated from ARMORY
         shop_weapons = []
         for w in ARMORY:
