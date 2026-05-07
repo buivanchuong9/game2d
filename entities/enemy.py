@@ -162,6 +162,17 @@ class Enemy:
     def load_frame_sheet(self, sprite_file_path, frame_width, frame_height, rows, cols):
         """Loads a sprite sheet and returns a list of frames."""
         sprite_sheet = pygame.image.load(sprite_file_path).convert_alpha()
+        sw, sh = sprite_sheet.get_size()
+        
+        # Safety check: if the sheet is smaller than required for the subsurfaces, pad it.
+        # This prevents "subsurface rectangle outside surface area" errors.
+        required_w = cols * frame_width
+        required_h = rows * frame_height
+        if sw < required_w or sh < required_h:
+            padded_sheet = pygame.Surface((max(sw, required_w), max(sh, required_h)), pygame.SRCALPHA)
+            padded_sheet.blit(sprite_sheet, (0, 0))
+            sprite_sheet = padded_sheet
+
         frames = []
         for row in range(rows):
             for col in range(cols):
