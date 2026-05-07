@@ -112,7 +112,7 @@ CARD_WEAPON_GRENADE = safe_load("Shop_Cards/Card_Weapon_GrenadeLauncher.png", (7
 CARD_WEAPON_POISON = safe_load("Shop_Cards/Card_Weapon_PoisonGun.png", (72, 96))
 CARD_WEAPON_TAESAR = safe_load("Shop_Cards/Card_Weapon_Taesar_Gun.png", (72, 96))
 CARD_BORDER = safe_load("Shop_Cards/Card_Border_1.png", (78, 102))
-BULLET_ICON = safe_load("Sprites/Sprites_Effect/Bullets/bullet_icon.png", (12, 28))
+BULLET_ICON = safe_load("Sprites/Sprites_Effect/Bullets/bullet_icon.png", (6, 15))
 CARD_PET_BIRD = safe_load("Shop_Cards/Card_Pet_BlueBird.png", (58, 78))
 CARD_PET_FOX = safe_load("Shop_Cards/Card_Pet_Fox.png", (58, 78))
 CARD_BUILD_MORTAR = safe_load("Shop_Cards/Card_Building_SuperMortar.png", (58, 78))
@@ -2469,7 +2469,7 @@ class Game:
         # Title + current objective (subtle)
         panel.blit(self.font_small.render("Quest", True, (220, 220, 230)), (12, 10))
         obj = self.objective_label()
-        panel.blit(self.font_small.render(obj, True, (190, 190, 205)), (12, 28))
+        panel.blit(self.font_small.render(obj, True, (190, 190, 205)), (6, 15))
 
         # Checkpoints
         yy = 50
