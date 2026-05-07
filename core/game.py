@@ -489,6 +489,18 @@ class Game:
         
         self.mouse_down = False
         self.state = "menu"
+        self.menu_start_time = pygame.time.get_ticks()
+        self.menu_particles = [{"x": random.randint(0, SCREEN_WIDTH), "y": random.randint(0, SCREEN_HEIGHT), "size": random.randint(1, 4), "speed": random.uniform(0.5, 2.0), "alpha": random.randint(50, 150)} for _ in range(50)]
+        self.lobby_bg = safe_load("Sprites/Sprites_Environment/screens/lobby_background.png", (SCREEN_WIDTH, SCREEN_HEIGHT))
+        self.story_bg = [
+            safe_load("Sprites/Sprites_Environment/screens/story_scene_1.png", (SCREEN_WIDTH, SCREEN_HEIGHT)),
+            safe_load("Sprites/Sprites_Environment/screens/story_scene_2.png", (SCREEN_WIDTH, SCREEN_HEIGHT)),
+            safe_load("Sprites/Sprites_Environment/screens/story_scene_1.png", (SCREEN_WIDTH, SCREEN_HEIGHT)),
+            safe_load("Sprites/Sprites_Environment/screens/story_scene_2.png", (SCREEN_WIDTH, SCREEN_HEIGHT)),
+        ]
+        self.menu_options = ["CHƠI MỚI", "CHƠI TIẾP", "CHỌN TẦNG", "HƯỚNG DẪN", "THOÁT"]
+        self.menu_selected_index = 0
+        self.show_level_select = False
         self.show_help = False
         self.show_shop = False
         self.show_map = False
@@ -1231,25 +1243,25 @@ class Game:
                 "title": "BÌNH MINH RỰC LỬA",
                 "subtitle": "Thành phố Neon sụp đổ chỉ sau một đêm. Một loại virus lạ từ Lab 42 đã biến mọi thứ thành đống đổ nát.",
                 "accent": RED,
-                "art": [("player", 160, 360), ("eye", 590, 160), ("goblin", 770, 360)],
+                "bg_index": 0,
             },
             {
                 "title": "KẺ SỐNG SÓT CUỐI CÙNG",
                 "subtitle": "Bạn là Jax, đội trưởng đội đặc nhiệm bị bỏ lại trên nóc tòa tháp SkyRise. Hy vọng duy nhất là tín hiệu từ chiếc trực thăng cứu hộ.",
                 "accent": ORANGE,
-                "art": [("player", 220, 340), ("hut", 670, 340), ("eye", 760, 180)],
+                "bg_index": 1,
             },
             {
                 "title": "HÀNH TRÌNH XUỐNG ĐỊA NGỤC",
                 "subtitle": "Mọi tầng lầu đều là một bãi chiến trường. Tìm kiếm vũ khí, giải cứu những người bị kẹt và mở đường máu xuống sảnh chính.",
                 "accent": BLUE,
-                "art": [("player", 170, 350), ("rocket", 540, 350), ("mortar", 760, 320)],
+                "bg_index": 2,
             },
             {
                 "title": "CHUYẾN BAY TỰ DO",
                 "subtitle": "Thời gian không còn nhiều. Kích hoạt đèn hiệu, tiêu diệt những tên gác cổng biến dị và thoát khỏi thành phố chết chóc này.",
                 "accent": YELLOW,
-                "art": [("player", 160, 360), ("mushroom", 620, 330), ("rocket", 800, 240)],
+                "bg_index": 3,
             },
         ]
 
@@ -2917,32 +2929,32 @@ class Game:
         screen.blit(subtitle_surf, (124, 175))
 
         # 4. Menu Items (with entrance animation)
-        menu_items = [
-            ("ENTER", "Bắt đầu hành trình"),
-            ("H", "Hướng dẫn sinh tồn"),
-            ("<- ->", "Khám phá bản đồ"),
-            ("ESC", "Rời khỏi thành phố"),
-        ]
-        
         y = 280
-        for i, (key, label) in enumerate(menu_items):
+        for i, label in enumerate(self.menu_options):
             # Slide in effect
             slide = max(0, 1.0 - elapsed * 2 + i * 0.2) * 200
             item_x = 126 - slide
             
-            # Hover/Active effect (not real mouse hover yet, just visual style)
-            icon_color = YELLOW if i == 0 else WHITE
+            # Hover/Active effect
+            is_selected = (i == self.menu_selected_index)
+            color = YELLOW if is_selected else WHITE
+            bg_color = (60, 64, 72) if is_selected else (40, 44, 52)
             
-            # Key Icon
-            key_rect = pygame.Rect(item_x, y, 90 if len(key) > 1 else 40, 34)
-            pygame.draw.rect(screen, (40, 44, 52), key_rect, border_radius=6)
-            pygame.draw.rect(screen, icon_color, key_rect, 2, border_radius=6)
-            key_txt = self.font_small.render(key, True, icon_color)
-            screen.blit(key_txt, key_txt.get_rect(center=key_rect.center))
+            # Draw Item Box
+            item_rect = pygame.Rect(item_x, y, 260, 46)
+            pygame.draw.rect(screen, bg_color, item_rect, border_radius=6)
+            if is_selected:
+                pygame.draw.rect(screen, color, item_rect, 2, border_radius=6)
             
             # Label
-            screen.blit(self.font.render(label, True, WHITE), (key_rect.right + 20, y + 4))
-            y += 54
+            label_surf = self.font.render(label, True, color)
+            screen.blit(label_surf, (item_rect.x + 20, item_rect.y + 12))
+            
+            # Selection marker
+            if is_selected:
+                screen.blit(self.font_big.render(">", True, YELLOW), (item_rect.x - 30, item_rect.y - 2))
+                
+            y += 60
 
         # 5. Features / Teaser (Bottom Left)
         features = [
@@ -2955,61 +2967,48 @@ class Game:
             screen.blit(self.font_small.render(line, True, SOFT), (126, fy))
             fy += 24
 
-        # 6. Map Selector (Premium Look)
-        map_rect = pygame.Rect(SCREEN_WIDTH - 500, 110, 420, 580)
-        # Glassmorphism effect
-        glass = pygame.Surface((map_rect.width, map_rect.height), pygame.SRCALPHA)
-        glass.fill((30, 32, 44, 160))
-        screen.blit(glass, map_rect.topleft)
-        pygame.draw.rect(screen, (255, 255, 255, 40), map_rect, 1, border_radius=12)
-        
-        # Map Selector Title
-        header_y = map_rect.y + 24
-        screen.blit(self.font_big.render("CHỌN KHU VỰC", True, WHITE), (map_rect.x + 30, header_y))
-        pygame.draw.line(screen, ORANGE, (map_rect.x + 30, header_y + 45), (map_rect.right - 30, header_y + 45), 2)
-        
-        # Map List
-        list_top = header_y + 70
-        total = len(self.map_assets)
-        start = max(0, min(self.selected_map_index - 3, max(0, total - 8)))
-        for idx in range(start, min(total, start + 8)):
-            path = self.map_assets[idx]
-            name = "Vùng Đất Mặc Định" if path is None else os.path.splitext(os.path.basename(path))[0]
-            name = name.replace("_", " ").title()
+        # 6. Map Selector (Level Select Overlay)
+        if getattr(self, "show_level_select", False):
+            # Blur-like background
+            shadow = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+            shadow.fill((0, 0, 0, 180))
+            screen.blit(shadow, (0, 0))
             
-            is_selected = (idx == self.selected_map_index)
-            color = YELLOW if is_selected else SOFT
+            map_rect = pygame.Rect(SCREEN_WIDTH//2 - 210, 110, 420, 580)
+            # Glassmorphism effect
+            glass = pygame.Surface((map_rect.width, map_rect.height), pygame.SRCALPHA)
+            glass.fill((30, 32, 44, 220))
+            screen.blit(glass, map_rect.topleft)
+            pygame.draw.rect(screen, (255, 255, 255, 40), map_rect, 2, border_radius=12)
             
-            if is_selected:
-                # Selection Highlight
-                sel_rect = pygame.Rect(map_rect.x + 15, list_top - 5, map_rect.width - 30, 34)
-                pygame.draw.rect(screen, (255, 165, 0, 40), sel_rect, border_radius=6)
-                pygame.draw.rect(screen, ORANGE, sel_rect, 1, border_radius=6)
+            # Map Selector Title
+            header_y = map_rect.y + 24
+            screen.blit(self.font_big.render("CHỌN TẦNG", True, WHITE), (map_rect.x + 30, header_y))
+            pygame.draw.line(screen, ORANGE, (map_rect.x + 30, header_y + 45), (map_rect.right - 30, header_y + 45), 2)
             
-            screen.blit(self.font.render(name, True, color), (map_rect.x + 40, list_top))
-            list_top += 40
+            # Map List
+            list_top = header_y + 70
+            total = len(self.chapters) if self.chapters else 0
+            if total > 0:
+                start = max(0, min(self.selected_map_index - 3, max(0, total - 8)))
+                for idx in range(start, min(total, start + 8)):
+                    chap = self.chapters[idx]
+                    name = f"Chương {idx+1}: {chap.title}"
+                    
+                    is_selected = (idx == self.selected_map_index)
+                    color = YELLOW if is_selected else SOFT
+                    
+                    if is_selected:
+                        # Selection Highlight
+                        sel_rect = pygame.Rect(map_rect.x + 15, list_top - 5, map_rect.width - 30, 34)
+                        pygame.draw.rect(screen, (255, 165, 0, 40), sel_rect, border_radius=6)
+                        pygame.draw.rect(screen, ORANGE, sel_rect, 1, border_radius=6)
+                    
+                    screen.blit(self.font.render(name, True, color), (map_rect.x + 40, list_top))
+                    list_top += 40
 
-        # Map Preview Image
-        if self.map_background_surface is not None:
-            preview_h = 160
-            preview_w = int(preview_h * (MAP_WIDTH / MAP_HEIGHT))
-            preview = pygame.transform.smoothscale(self.map_background_surface, (preview_w, preview_h))
-            preview_rect = preview.get_rect(centerx=map_rect.centerx, bottom=map_rect.bottom - 40)
-            
-            # Shadow for preview
-            shadow_rect = preview_rect.copy()
-            shadow_rect.inflate_ip(10, 10)
-            pygame.draw.rect(screen, (0, 0, 0, 100), shadow_rect, border_radius=8)
-            
-            screen.blit(preview, preview_rect.topleft)
-            pygame.draw.rect(screen, WHITE, preview_rect, 2, border_radius=4)
-            
-            # Map Name Overlay on Preview
-            name_label = self.font_small.render(self.selected_map_name, True, WHITE)
-            label_bg = pygame.Surface((preview_w, 24), pygame.SRCALPHA)
-            label_bg.fill((0, 0, 0, 180))
-            screen.blit(label_bg, (preview_rect.x, preview_rect.bottom - 24))
-            screen.blit(name_label, (preview_rect.x + 10, preview_rect.bottom - 22))
+            hint = self.font_small.render("Mũi tên để chọn, ENTER để bắt đầu, ESC để thoát", True, CYAN)
+            screen.blit(hint, hint.get_rect(centerx=map_rect.centerx, bottom=map_rect.bottom - 20))
 
         # 7. Help Overlay
         if self.show_help:
@@ -3089,16 +3088,32 @@ class Game:
             self.state = "playing"
 
     def draw_trailer_scene(self, scene, local_elapsed):
-        screen.fill((5, 5, 10))
-        # Gradient background
-        for y in range(SCREEN_HEIGHT):
-            blend = y / SCREEN_HEIGHT
-            c = [
-                int(scene["accent"][0] * 0.1 * (1-blend)),
-                int(scene["accent"][1] * 0.1 * (1-blend)),
-                int(scene["accent"][2] * 0.1 * (1-blend))
-            ]
-            pygame.draw.line(screen, c, (0, y), (SCREEN_WIDTH, y))
+        # Background Image
+        bg_idx = scene.get("bg_index", 0)
+        bg_surf = self.story_bg[bg_idx] if bg_idx < len(self.story_bg) else None
+        
+        if bg_surf:
+            # Zoom effect
+            zoom = 1.0 + (local_elapsed / 5000.0) * 0.1
+            bg_w, bg_h = int(SCREEN_WIDTH * zoom), int(SCREEN_HEIGHT * zoom)
+            bg_scaled = pygame.transform.smoothscale(bg_surf, (bg_w, bg_h))
+            screen.blit(bg_scaled, (-(bg_w - SCREEN_WIDTH)//2, -(bg_h - SCREEN_HEIGHT)//2))
+            
+            # Dark overlay for text
+            overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+            overlay.fill((0, 0, 0, 160))
+            screen.blit(overlay, (0, 0))
+        else:
+            screen.fill((5, 5, 10))
+            # Gradient background
+            for y in range(SCREEN_HEIGHT):
+                blend = y / SCREEN_HEIGHT
+                c = [
+                    int(scene["accent"][0] * 0.1 * (1-blend)),
+                    int(scene["accent"][1] * 0.1 * (1-blend)),
+                    int(scene["accent"][2] * 0.1 * (1-blend))
+                ]
+                pygame.draw.line(screen, c, (0, y), (SCREEN_WIDTH, y))
 
         # Cinematic bars
         pygame.draw.rect(screen, BLACK, (0, 0, SCREEN_WIDTH, 80))
@@ -3123,16 +3138,9 @@ class Game:
         
         yy = 320
         for line in wrapped:
-            txt = self.font_big.render(line, True, SOFT)
+            txt = self.font_big.render(line, True, WHITE)
             screen.blit(txt, (SCREEN_WIDTH//2 - txt.get_width()//2, yy))
             yy += 45
-
-        # Art Assets with Floating Animation
-        for idx, art in enumerate(scene["art"]):
-            key, x, y = art
-            bob = int(math.sin((pygame.time.get_ticks() * 0.003) + idx) * 15)
-            # Offset x based on index for variety
-            self.draw_trailer_art(key, x, y + bob + 100)
 
     def draw_trailer_art(self, key, x, y):
         """Draw specific art assets for the trailer sequence."""
@@ -3750,20 +3758,57 @@ class Game:
 
         if self.state == "menu":
             if event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_RETURN:
-                    sound_manager.play("nut_bam")
-                    self.trailer_started_at = pygame.time.get_ticks()
-                    self.state = "intro"
-                    # Bắt đầu phát nhạc chương 1 khi vào trailer/game
-                    if self.chapters:
-                        sound_manager.play_music(f"nhac_nen_{self.chapters[0].id}")
-                elif event.key in (pygame.K_LEFT, pygame.K_UP):
-                    self.set_map_background_by_index(self.selected_map_index - 1)
-                elif event.key in (pygame.K_RIGHT, pygame.K_DOWN):
-                    self.set_map_background_by_index(self.selected_map_index + 1)
-                elif event.key == pygame.K_h:
-                    sound_manager.play("nut_bam")
-                    self.show_help = not self.show_help
+                if self.show_help:
+                    if event.key in (pygame.K_h, pygame.K_ESCAPE, pygame.K_RETURN):
+                        sound_manager.play("nut_bam")
+                        self.show_help = False
+                elif self.show_level_select:
+                    if event.key == pygame.K_ESCAPE:
+                        sound_manager.play("nut_bam")
+                        self.show_level_select = False
+                    elif event.key in (pygame.K_LEFT, pygame.K_UP):
+                        self.set_map_background_by_index(self.selected_map_index - 1)
+                        sound_manager.play("nut_bam")
+                    elif event.key in (pygame.K_RIGHT, pygame.K_DOWN):
+                        self.set_map_background_by_index(self.selected_map_index + 1)
+                        sound_manager.play("nut_bam")
+                    elif event.key == pygame.K_RETURN:
+                        sound_manager.play("nut_bam")
+                        if self.chapters:
+                            self.chapter_index = self.selected_map_index % len(self.chapters)
+                            self.set_chapter(self.chapter_index)
+                            self.trailer_started_at = pygame.time.get_ticks()
+                            self.state = "intro"
+                            sound_manager.play_music(f"nhac_nen_{self.chapters[self.chapter_index].id}")
+                else:
+                    if event.key == pygame.K_UP:
+                        self.menu_selected_index = (self.menu_selected_index - 1) % len(self.menu_options)
+                        sound_manager.play("nut_bam")
+                    elif event.key == pygame.K_DOWN:
+                        self.menu_selected_index = (self.menu_selected_index + 1) % len(self.menu_options)
+                        sound_manager.play("nut_bam")
+                    elif event.key == pygame.K_RETURN:
+                        sound_manager.play("nut_bam")
+                        selected = self.menu_options[self.menu_selected_index]
+                        if selected == "CHƠI MỚI":
+                            self.chapter_index = 0
+                            self.set_chapter(0)
+                            self.trailer_started_at = pygame.time.get_ticks()
+                            self.state = "intro"
+                            if self.chapters:
+                                sound_manager.play_music(f"nhac_nen_{self.chapters[0].id}")
+                        elif selected == "CHƠI TIẾP":
+                            self.set_chapter(self.chapter_index)
+                            self.state = "playing"
+                            if self.chapters:
+                                sound_manager.play_music(f"nhac_nen_{self.chapters[self.chapter_index].id}")
+                        elif selected == "CHỌN TẦNG":
+                            self.show_level_select = True
+                        elif selected == "HƯỚNG DẪN":
+                            self.show_help = True
+                        elif selected == "THOÁT":
+                            pygame.quit()
+                            sys.exit()
             return
 
         if self.state == "intro":
@@ -3838,6 +3883,7 @@ class Game:
                 self.state = "playing"
             elif event.key == pygame.K_m:
                 self.state = "menu"
+                self.menu_start_time = pygame.time.get_ticks()
             elif event.key == pygame.K_q:
                 pygame.quit()
                 sys.exit()
@@ -3865,6 +3911,7 @@ class Game:
                 elif btns.get("menu") and btns["menu"].collidepoint(mx, my):
                     sound_manager.play("nut_bam")
                     self.state = "menu"
+                    self.menu_start_time = pygame.time.get_ticks()
                     sound_manager.play_music("nhac_cho_sanh")
                 elif btns.get("quit") and btns["quit"].collidepoint(mx, my):
                     sound_manager.play("nut_bam")
