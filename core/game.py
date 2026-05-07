@@ -489,6 +489,9 @@ class Game:
         
         self.mouse_down = False
         self.state = "menu"
+        self.menu_start_time = pygame.time.get_ticks()
+        self.menu_particles = [{"x": random.randint(0, SCREEN_WIDTH), "y": random.randint(0, SCREEN_HEIGHT), "size": random.randint(1, 4), "speed": random.uniform(0.5, 2.0), "alpha": random.randint(50, 150)} for _ in range(50)]
+        self.lobby_bg = None
         self.show_help = False
         self.show_shop = False
         self.show_map = False
@@ -3838,6 +3841,7 @@ class Game:
                 self.state = "playing"
             elif event.key == pygame.K_m:
                 self.state = "menu"
+                self.menu_start_time = pygame.time.get_ticks()
             elif event.key == pygame.K_q:
                 pygame.quit()
                 sys.exit()
@@ -3865,6 +3869,7 @@ class Game:
                 elif btns.get("menu") and btns["menu"].collidepoint(mx, my):
                     sound_manager.play("nut_bam")
                     self.state = "menu"
+                    self.menu_start_time = pygame.time.get_ticks()
                     sound_manager.play_music("nhac_cho_sanh")
                 elif btns.get("quit") and btns["quit"].collidepoint(mx, my):
                     sound_manager.play("nut_bam")
