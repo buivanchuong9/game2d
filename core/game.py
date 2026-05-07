@@ -2490,7 +2490,7 @@ class Game:
         self.draw_path_overlay(screen)
         
         # HUD mission always visible
-        self.draw_mission_hud(screen)
+        # self.draw_mission_hud(screen)
 
     def draw_mission_hud(self, surface):
         """Always-visible mission HUD (no need to talk to NPC)."""
@@ -4069,17 +4069,18 @@ class Game:
         overlay.fill((10, 8, 12, 220))
         screen.blit(overlay, (0, 0))
         
-        shop_rect = pygame.Rect(100, 50, SCREEN_WIDTH - 200, SCREEN_HEIGHT - 100)
+        # --- LEFT SIDE: SHOP ---
+        shop_rect = pygame.Rect(40, 50, SCREEN_WIDTH // 2 + 20, SCREEN_HEIGHT - 100)
         pygame.draw.rect(screen, PANEL, shop_rect, border_radius=20)
         pygame.draw.rect(screen, WHITE, shop_rect, 2, border_radius=20)
         
-        screen.blit(self.font_title.render("SURVIVOR SHOP", True, YELLOW), (shop_rect.x + 40, shop_rect.y + 20))
-        screen.blit(self.font_big.render(f"Money: {self.money}", True, YELLOW), (shop_rect.right - 260, shop_rect.y + 30))
+        screen.blit(self.font_title.render("SURVIVOR SHOP", True, YELLOW), (shop_rect.x + 30, shop_rect.y + 20))
+        screen.blit(self.font_big.render(f"Money: {self.money}", True, YELLOW), (shop_rect.right - 180, shop_rect.y + 30))
         
         # Categories Tabs
-        tab_x = shop_rect.x + 40
+        tab_x = shop_rect.x + 30
         tab_y = shop_rect.y + 90
-        tab_w = 150
+        tab_w = 140
         tab_h = 40
         for i, cat in enumerate(self.shop_categories):
             color = YELLOW if self.shop_category == cat else SOFT
@@ -4091,7 +4092,7 @@ class Game:
             screen.blit(txt, txt.get_rect(center=tab_rect.center))
 
         # OK Button (Next Level)
-        ok_rect = pygame.Rect(shop_rect.right - 180, shop_rect.bottom - 70, 140, 50)
+        ok_rect = pygame.Rect(shop_rect.right - 130, shop_rect.bottom - 70, 100, 50)
         pygame.draw.rect(screen, GREEN, ok_rect, border_radius=12)
         ok_txt = self.font_big.render("OK", True, WHITE)
         screen.blit(ok_txt, ok_txt.get_rect(center=ok_rect.center))
@@ -4102,15 +4103,14 @@ class Game:
         
         items = self.shop_content.get(self.shop_category, [])
         for i, (sid, title, desc) in enumerate(items):
-            r, c = i // 3, i % 3
-            cx = c * 320
+            r, c = i // 2, i % 2
+            cx = c * 310
             cy = r * 135
             card_rect = pygame.Rect(cx, cy, 290, 115)
             pygame.draw.rect(items_surf, CARD, card_rect, border_radius=16)
             pygame.draw.rect(items_surf, STROKE, card_rect, 1, border_radius=16)
             pygame.draw.rect(items_surf, YELLOW, (card_rect.x, card_rect.y, card_rect.width, 4), border_top_left_radius=16, border_top_right_radius=16)
             
-            # Icon / Image rendering
             tx = 14
             img = None
             if sid.startswith("buy_weapon_"):
@@ -4124,20 +4124,13 @@ class Game:
             elif sid.startswith("pet_"):
                 pet_id = sid.replace("pet_", "")
                 pet_cards = {
-                    "blue_bird": CARD_PET_BIRD,
-                    "fox": CARD_PET_FOX,
-                    "eagle": CARD_PET_EAGLE,
-                    "cat_gray": CARD_PET_GRAY_CAT,
-                    "cat_orange": CARD_PET_ORANGE_CAT,
-                    "racoon": CARD_PET_RACOON,
+                    "blue_bird": CARD_PET_BIRD, "fox": CARD_PET_FOX, "eagle": CARD_PET_EAGLE,
+                    "cat_gray": CARD_PET_GRAY_CAT, "cat_orange": CARD_PET_ORANGE_CAT, "racoon": CARD_PET_RACOON,
                 }
                 img = pet_cards.get(pet_id)
             else:
-                # Items (heal, armor, ammo)
                 img = ITEM_SURFACES.get(sid)
-                if img:
-                    # Scale item icons a bit larger for the shop if needed
-                    img = pygame.transform.scale(img, (48, 48))
+                if img: img = pygame.transform.scale(img, (48, 48))
 
             if img:
                 items_surf.blit(img, (cx + 12, cy + 25))
@@ -4147,23 +4140,67 @@ class Game:
             items_surf.blit(self.font_small.render(desc, True, SOFT), (cx + tx, cy + 56))
             items_surf.blit(self.font.render("Price: 1", True, YELLOW), (cx + tx, cy + 86))
 
-        # Blit clipped area
         screen.blit(items_surf, (scroll_rect.x, scroll_rect.y), (0, self.shop_scroll_y, scroll_rect.width, scroll_rect.height))
         
-        # Scroll indicator
-        if len(items) > 9:
+        if len(items) > 6:
             pygame.draw.rect(screen, SOFT, (shop_rect.right - 10, scroll_rect.y, 4, scroll_rect.height), border_radius=2)
             scroll_h = max(20, int(scroll_rect.height * (scroll_rect.height / 1200)))
             scroll_y = scroll_rect.y + int(self.shop_scroll_y * (scroll_rect.height / 1200))
             pygame.draw.rect(screen, YELLOW, (shop_rect.right - 10, min(scroll_rect.bottom - scroll_h, scroll_y), 4, scroll_h), border_radius=2)
 
+        # --- RIGHT SIDE: BACKPACK ---
+        bp_rect = pygame.Rect(shop_rect.right + 20, 50, SCREEN_WIDTH - shop_rect.right - 60, SCREEN_HEIGHT - 100)
+        pygame.draw.rect(screen, PANEL, bp_rect, border_radius=20)
+        pygame.draw.rect(screen, (0, 100, 100), bp_rect, 2, border_radius=20)
+        
+        screen.blit(self.font_title.render("BALO VŨ KHÍ", True, CYAN), (bp_rect.x + 30, bp_rect.y + 20))
+        
+        grid_y = bp_rect.y + 90
+        col_w = (bp_rect.width - 60) // 2
+        row_h = 130
+        
+        for i in range(6): # Max 6 weapons
+            r, c = i // 2, i % 2
+            slot_rect = pygame.Rect(bp_rect.x + 25 + c * (col_w + 10), grid_y + r * (row_h + 10), col_w, row_h)
+            
+            pygame.draw.rect(screen, (28, 32, 42), slot_rect, border_radius=10)
+            pygame.draw.rect(screen, (50, 60, 70), slot_rect, 1, border_radius=10)
+            
+            if i < len(self.weapon_manager.weapons):
+                w = self.weapon_manager.weapons[i]
+                if self.weapon_manager.current_weapon == w:
+                    pygame.draw.rect(screen, YELLOW, slot_rect, 2, border_radius=10)
+                
+                try:
+                    img = ALL_GRAPHICS_SURFACES.get(w.image_path)
+                    if not img: img = pygame.image.load(w.image_path).convert_alpha()
+                    if img:
+                        ratio = img.get_width() / img.get_height()
+                        target_h = 50
+                        target_w = int(target_h * ratio)
+                        if target_w > col_w - 20:
+                            target_w = col_w - 20
+                            target_h = int(target_w / ratio)
+                        img = pygame.transform.scale(img, (target_w, target_h))
+                        screen.blit(img, img.get_rect(center=(slot_rect.centerx, slot_rect.y + 40)))
+                except: pass
+                
+                is_melee = getattr(w, "melee", False)
+                ammo_str = f"Đạn: {w.ammo_in_mag}/{w.reserve_ammo}" if not is_melee else "Vô hạn"
+                screen.blit(self.font_small.render(ammo_str, True, WHITE), (slot_rect.x + 10, slot_rect.bottom - 30))
+                
+                # BÁN button
+                sell_btn = pygame.Rect(slot_rect.right - 55, slot_rect.bottom - 35, 45, 25)
+                pygame.draw.rect(screen, (200, 160, 40), sell_btn, border_radius=5)
+                screen.blit(self.font_small.render("BÁN", True, BLACK), (sell_btn.x + 8, sell_btn.y + 2))
+
     def handle_shop_click(self, mx, my):
-        shop_rect = pygame.Rect(100, 50, SCREEN_WIDTH - 200, SCREEN_HEIGHT - 100)
+        shop_rect = pygame.Rect(40, 50, SCREEN_WIDTH // 2 + 20, SCREEN_HEIGHT - 100)
         
         # Tabs clicks
-        tab_x = shop_rect.x + 40
+        tab_x = shop_rect.x + 30
         tab_y = shop_rect.y + 90
-        tab_w = 150
+        tab_w = 140
         tab_h = 40
         for i, cat in enumerate(self.shop_categories):
             tab_rect = pygame.Rect(tab_x + i * (tab_w + 10), tab_y, tab_w, tab_h)
@@ -4173,7 +4210,7 @@ class Game:
                 return
 
         # OK Button click
-        ok_rect = pygame.Rect(shop_rect.right - 180, shop_rect.bottom - 70, 140, 50)
+        ok_rect = pygame.Rect(shop_rect.right - 130, shop_rect.bottom - 70, 100, 50)
         if ok_rect.collidepoint(mx, my):
             if self.pending_transition:
                 self.set_chapter(self.chapter_index + 1)
@@ -4182,6 +4219,35 @@ class Game:
             self.autoplay = False
             self.show_shop = False
             return
+
+        # Backpack interactions (sell/select)
+        bp_rect = pygame.Rect(shop_rect.right + 20, 50, SCREEN_WIDTH - shop_rect.right - 60, SCREEN_HEIGHT - 100)
+        if bp_rect.collidepoint(mx, my):
+            grid_y = bp_rect.y + 90
+            col_w = (bp_rect.width - 60) // 2
+            row_h = 130
+            for i in range(len(self.weapon_manager.weapons)):
+                r, c = i // 2, i % 2
+                slot_rect = pygame.Rect(bp_rect.x + 25 + c * (col_w + 10), grid_y + r * (row_h + 10), col_w, row_h)
+                sell_btn = pygame.Rect(slot_rect.right - 55, slot_rect.bottom - 35, 45, 25)
+                if sell_btn.collidepoint(mx, my):
+                    w = self.weapon_manager.weapons[i]
+                    if len(self.weapon_manager.weapons) > 1:
+                        self.weapon_manager.weapons.remove(w)
+                        if self.weapon_manager.current_weapon == w:
+                            self.weapon_manager.current_weapon = self.weapon_manager.weapons[0]
+                        self.money += 1
+                        self.popup = f"Đã bán: {w.name} (+1$)"
+                        self.popup_timer = pygame.time.get_ticks() + 1500
+                        sound_manager.play("nhat_do")
+                    else:
+                        self.popup = "Không thể bán vũ khí cuối cùng!"
+                        self.popup_timer = pygame.time.get_ticks() + 1500
+                    return
+                if slot_rect.collidepoint(mx, my):
+                    self.weapon_manager.current_weapon = self.weapon_manager.weapons[i]
+                    sound_manager.play("nut_bam")
+                    return
 
         # Item clicks (with scroll offset)
         scroll_rect = pygame.Rect(shop_rect.x + 20, shop_rect.y + 140, shop_rect.width - 40, shop_rect.height - 230)
@@ -4194,8 +4260,8 @@ class Game:
 
         items = self.shop_content.get(self.shop_category, [])
         for i, (sid, title, desc) in enumerate(items):
-            r, c = i // 3, i % 3
-            cx = c * 320
+            r, c = i // 2, i % 2
+            cx = c * 310
             cy = r * 135
             card_rect = pygame.Rect(cx, cy, 290, 115)
             
