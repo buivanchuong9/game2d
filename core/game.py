@@ -2048,12 +2048,12 @@ class Game:
         self.combo_counter += 1
         self.frenzy_window_until = now + 3000 # 3 seconds to keep combo
         
-        # Feedback SFX
+        # Feedback SFX (Exclusively using combo.mp3 for milestones)
+        if self.combo_counter in [3, 5, 10, 15, 20]:
+            sound_manager.play("combo")
+            
         if self.combo_counter >= 10:
-            sound_manager.play("hoan_thanh")
             self.combo_shake_until = now + 500
-        elif self.combo_counter >= 3:
-            sound_manager.play("qua_man")
             
         # Spawn loot
         etile = (int(enemy.x // TILE_SIZE), int(enemy.y // TILE_SIZE))
