@@ -596,6 +596,16 @@ class Game:
         
         # Phát nhạc chờ sảnh khi khởi động
         sound_manager.play_music("nhac_cho_sanh")
+        
+        # Crosshair loading (using fixed version with background removed)
+        try:
+            raw_crosshair = pygame.image.load(os.path.join(_ASSET_BASE, "Sprites/Sprites_Effect/tam_ban_fixed.png")).convert_alpha()
+            # THAY ĐỔI KÍCH THƯỚC TÂM Ở ĐÂY (Width, Height)
+            self.crosshair_size = (20,20)
+            self.crosshair_surf = pygame.transform.scale(raw_crosshair, self.crosshair_size)
+        except:
+            self.crosshair_surf = safe_load("Sprites/Sprites_Effect/tam_ban_fixed.png", (64, 64))
+
         self.set_chapter(0)
 
     def discover_map_backgrounds(self):
@@ -3641,6 +3651,14 @@ class Game:
 
     def draw(self):
         screen.fill(BLACK)
+        
+        # Crosshair visibility logic: Only show during active gameplay
+        show_crosshair = (self.state == "playing" and 
+                          not self.show_shop and 
+                          not self.show_backpack and 
+                          not self.show_map and
+                          not (hasattr(self, 'dialog_npc') and self.dialog_npc))
+        
         if self.state == "menu":
             self.draw_menu()
         elif self.state == "intro":
@@ -3658,6 +3676,16 @@ class Game:
                 self.draw_pause()
         elif self.state in ["win", "lose"]:
             self.draw_end_screen()
+            
+        # Draw custom crosshair or show system cursor
+        if show_crosshair:
+            pygame.mouse.set_visible(False)
+            mx, my = pygame.mouse.get_pos()
+            if hasattr(self, 'crosshair_surf'):
+                screen.blit(self.crosshair_surf, (mx - self.crosshair_surf.get_width()//2, my - self.crosshair_surf.get_height()//2))
+        else:
+            pygame.mouse.set_visible(True)
+            
         pygame.display.flip()
 
     def draw_mission_panel(self):
