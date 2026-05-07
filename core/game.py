@@ -2409,7 +2409,11 @@ class Game:
             return
             
         # Bright Cyan/Green that glows in the dark
-        color = (0, 255, 255) 
+        # Purple for the final escape chapter
+        if self.chapter and self.chapter.id == "escape":
+            color = (180, 0, 255) 
+        else:
+            color = (0, 255, 255) 
         points = []
         for x, y in self.exit_path:
             sx, sy = self.camera.world_to_screen(x * TILE_SIZE + 8, y * TILE_SIZE + 8)
@@ -2488,33 +2492,108 @@ class Game:
         surface.blit(panel, (rect.x, rect.y))
 
     def draw_darkness(self, surface):
-        """Simulate blackout: dark screen + light around player."""
+        """Simulate blackout: dark screen + light around player + flashlight cone."""
         cid = self.chapter.id if self.chapter else ""
-        if cid in {"roof", "escape"}:
-            return
+        # Removed restriction for roof/escape to show off the effect everywhere
+        # if cid in {"roof", "escape"}:
+        #     return
+            
         # If power restored, keep only a very subtle vignette
         power_on = bool(self.mission and self.mission.data.get("power_restored", False))
-        base_alpha = 80 if power_on else 190
+        base_alpha = 90 if power_on else 220 # High darkness for better atmosphere
+        
         # Flicker when power is off
         if not power_on:
             t = pygame.time.get_ticks()
             if (t // 220) % 7 == 0:
-                base_alpha = 230
-            elif (t // 180) % 9 == 0:
-                base_alpha = 160
+                base_alpha = 245
+            elif (t // 180) % 11 == 0:
+                base_alpha = 190
+
+        # light_mask: same size as darkness, filled with base_alpha.
+        # We draw gradient shapes onto it (normal draw, no special_flags needed),
+        # then blit it onto darkness with BLEND_RGBA_MIN so low-alpha pixels in
+        # light_mask "punch" bright holes into the darkness.
+        # (pygame.draw.* does NOT support special_flags in pygame 2.6.1;
+        #  Surface.blit() DOES.)
+        light_mask = pygame.Surface((MAP_WIDTH, MAP_HEIGHT), pygame.SRCALPHA)
+        light_mask.fill((0, 0, 0, base_alpha))
 
         darkness = pygame.Surface((MAP_WIDTH, MAP_HEIGHT), pygame.SRCALPHA)
         darkness.fill((0, 0, 0, base_alpha))
 
-        # Light around player: "cut out" with gradient circles
         psx, psy = self.camera.world_to_screen(self.player.x, self.player.y)
-        radius = 170 if power_on else 140
-        for i in range(8):
-            r = int(radius * (1 - i / 8))
-            a = int(180 * (i / 8))
-            pygame.draw.circle(darkness, (0, 0, 0, a), (int(psx), int(psy)), r)
 
+        # 1. Radial Light around player — gradient circles on light_mask
+        radius = 90 if power_on else 60
+        for i in range(25):
+            target_alpha = int(base_alpha * (i / 25))
+            r = int(radius * (1.0 + (25 - i) * 0.08))
+            pygame.draw.circle(light_mask, (0, 0, 0, target_alpha), (int(psx), int(psy)), r)
+
+        # 2. Flashlight Cone — gradient polygons on light_mask
+        mx, my = pygame.mouse.get_pos()
+        flashlight_angle = 0
+        cone_len = 400 if power_on else 320
+        cone_width = 0.62  # radians
+
+        if mx < MAP_WIDTH:
+            flashlight_angle = math.atan2(my - psy, mx - psx)
+
+            num_layers = 35
+            for i in range(num_layers):
+                target_alpha = int(base_alpha * (i / num_layers))
+                c_width = cone_width * (0.4 + 0.6 * (i / num_layers))
+
+                points = [(psx, psy)]
+                steps = 18
+                for j in range(steps + 1):
+                    a = flashlight_angle - c_width / 2 + (c_width * j / steps)
+                    l = cone_len * (1.0 - (i / num_layers) * 0.1)
+                    points.append((psx + math.cos(a) * l, psy + math.sin(a) * l))
+
+                pygame.draw.polygon(light_mask, (0, 0, 0, target_alpha), points)
+
+        # Merge: wherever light_mask has lower alpha, it "clears" the darkness
+        darkness.blit(light_mask, (0, 0), special_flags=pygame.BLEND_RGBA_MIN)
         surface.blit(darkness, (0, 0))
+        
+        # 3. Red Eyes for enemies in the dark (only when power is off)
+        if not power_on:
+            for entry in self.story_enemies:
+                if entry.enemy.is_dead: continue
+                # Enemy world position
+                ex_world, ey_world = entry.enemy.x, entry.enemy.y
+                ex, ey = self.camera.world_to_screen(ex_world, ey_world)
+                
+                # Boundary check
+                if not (-50 <= ex < MAP_WIDTH + 50 and -50 <= ey < MAP_HEIGHT + 50): continue
+                
+                # Check if in radial light
+                dist = math.hypot(ex_world - self.player.x, ey_world - self.player.y)
+                in_radial = dist < radius * 0.9 # Slightly smaller to ensure darkness
+                
+                # Check if in cone
+                in_cone = False
+                if mx < MAP_WIDTH:
+                    angle_to_enemy = math.atan2(ey_world - self.player.y, ex_world - self.player.x)
+                    diff = (angle_to_enemy - flashlight_angle + math.pi) % (2 * math.pi) - math.pi
+                    if abs(diff) < (cone_width * 0.6) and dist < cone_len:
+                        in_cone = True
+                
+                if not in_radial and not in_cone:
+                    # Draw red eyes (glow in the dark)
+                    eye_offset = 6
+                    eye_v_offset = 12
+                    eye_size = 2
+                    # Pulse effect
+                    pulse = abs(math.sin(pygame.time.get_ticks() * 0.006))
+                    alpha = int(160 + 95 * pulse)
+                    eye_color = (255, 20, 20, alpha)
+                    
+                    # Eyes usually at head height, assume ~10-15 pixels above center
+                    pygame.draw.circle(surface, eye_color, (int(ex - eye_offset), int(ey - eye_v_offset)), eye_size)
+                    pygame.draw.circle(surface, eye_color, (int(ex + eye_offset), int(ey - eye_v_offset)), eye_size)
 
     def render_world(self, surface):
         # Get visible tile range from camera
@@ -4257,7 +4336,7 @@ class Game:
         elif self.state == "intro":
             self.draw_intro()
         elif self.state in ["playing", "pause"]:
-            self.render_world(screen)
+            self.draw_world()
             self.draw_sidebar()
             self.draw_overlays()
             self.draw_mission_panel() # Added transparent mission panel

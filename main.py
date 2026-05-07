@@ -2439,33 +2439,93 @@ class Game:
         surface.blit(panel, (rect.x, rect.y))
 
     def draw_darkness(self, surface):
-        """Simulate blackout: dark screen + light around player."""
+        """Simulate blackout: dark screen + light around player + flashlight cone."""
         cid = self.chapter.id if self.chapter else ""
         if cid in {"roof", "escape"}:
             return
+            
         # If power restored, keep only a very subtle vignette
         power_on = bool(self.mission and self.mission.data.get("power_restored", False))
-        base_alpha = 80 if power_on else 190
+        base_alpha = 90 if power_on else 220 # High darkness for better atmosphere
+        
         # Flicker when power is off
         if not power_on:
             t = pygame.time.get_ticks()
             if (t // 220) % 7 == 0:
-                base_alpha = 230
-            elif (t // 180) % 9 == 0:
-                base_alpha = 160
+                base_alpha = 245
+            elif (t // 180) % 11 == 0:
+                base_alpha = 190
 
         darkness = pygame.Surface((MAP_WIDTH, MAP_HEIGHT), pygame.SRCALPHA)
         darkness.fill((0, 0, 0, base_alpha))
 
-        # Light around player: "cut out" with gradient circles
         psx, psy = self.camera.world_to_screen(self.player.x, self.player.y)
-        radius = 170 if power_on else 140
-        for i in range(8):
-            r = int(radius * (1 - i / 8))
-            a = int(180 * (i / 8))
-            pygame.draw.circle(darkness, (0, 0, 0, a), (int(psx), int(psy)), r)
+        
+        # 1. Radial Light around player (Dynamic hole carving)
+        radius = 180 if power_on else 110
+        for i in range(12):
+            r = int(radius * (1.2 - i / 12))
+            alpha = int(base_alpha * (i / 12))
+            pygame.draw.circle(darkness, (0, 0, 0, alpha), (int(psx), int(psy)), r)
+
+        # 2. Flashlight Cone (Points towards mouse)
+        mx, my = pygame.mouse.get_pos()
+        flashlight_angle = 0
+        cone_len = 480 if power_on else 420
+        cone_width = 0.65 # radians (approx 37 degrees)
+        
+        if mx < MAP_WIDTH: # Only show flashlight if mouse is on the map
+            flashlight_angle = math.atan2(my - psy, mx - psx)
+            
+            # Draw cone layers for soft edges
+            for i in range(8):
+                c_alpha = int(base_alpha * (i / 8))
+                c_width = cone_width * (1.0 + i * 0.2)
+                points = [(psx, psy)]
+                steps = 15
+                for j in range(steps + 1):
+                    a = flashlight_angle - c_width/2 + (c_width * j / steps)
+                    points.append((psx + math.cos(a) * cone_len, psy + math.sin(a) * cone_len))
+                pygame.draw.polygon(darkness, (0, 0, 0, c_alpha), points)
 
         surface.blit(darkness, (0, 0))
+        
+        # 3. Red Eyes for enemies in the dark (only when power is off)
+        if not power_on:
+            for entry in self.story_enemies:
+                if entry.enemy.is_dead: continue
+                # Enemy world position
+                ex_world, ey_world = entry.enemy.x, entry.enemy.y
+                ex, ey = self.camera.world_to_screen(ex_world, ey_world)
+                
+                # Boundary check
+                if not (-50 <= ex < MAP_WIDTH + 50 and -50 <= ey < MAP_HEIGHT + 50): continue
+                
+                # Check if in radial light
+                dist = math.hypot(ex_world - self.player.x, ey_world - self.player.y)
+                in_radial = dist < radius * 0.9 # Slightly smaller to ensure darkness
+                
+                # Check if in cone
+                in_cone = False
+                if mx < MAP_WIDTH:
+                    angle_to_enemy = math.atan2(ey_world - self.player.y, ex_world - self.player.x)
+                    diff = (angle_to_enemy - flashlight_angle + math.pi) % (2 * math.pi) - math.pi
+                    if abs(diff) < (cone_width * 0.6) and dist < cone_len:
+                        in_cone = True
+                
+                if not in_radial and not in_cone:
+                    # Draw red eyes (glow in the dark)
+                    eye_offset = 6
+                    eye_v_offset = 12
+                    eye_size = 2
+                    # Pulse effect
+                    pulse = abs(math.sin(pygame.time.get_ticks() * 0.006))
+                    alpha = int(160 + 95 * pulse)
+                    eye_color = (255, 20, 20, alpha)
+                    
+                    # Eyes usually at head height, assume ~10-15 pixels above center
+                    pygame.draw.circle(surface, eye_color, (int(ex - eye_offset), int(ey - eye_v_offset)), eye_size)
+                    pygame.draw.circle(surface, eye_color, (int(ex + eye_offset), int(ey - eye_v_offset)), eye_size)
 
     def render_world(self, surface):
         # Get visible tile range from camera
