@@ -450,6 +450,10 @@ class Game:
         self.dialog_chars_shown = 0
         self.dialog_speed_cps = 70  # chars per second
         self.end_reason = ""
+        self.session_stats = {}  # snapshot taken at game over/win
+        self.game_start_time = pygame.time.get_ticks()
+        self.money_spent = 0
+        self.killer_name = ""
         self._last_player_hp = self.player.health
         self._last_player_hit_sfx_at = 0
         
@@ -1831,7 +1835,28 @@ class Game:
                     sound_manager.play_music("nhac_chien_thang")
 
             if self.player.health <= 0:
-                self.end_reason = "Bạn đã bị zombie áp đảo trước khi thoát được khỏi thành phố."
+                # Identify killer — StoryEnemy wraps the actual enemy in .enemy
+                killer = "Zombie"
+                if self.story_enemies:
+                    closest = min(self.story_enemies, key=lambda e: math.hypot(e.enemy.x - self.player.x, e.enemy.y - self.player.y))
+                    killer = type(closest.enemy).__name__
+                killer_display = {
+                    "Goblin": "Zombie Goblin", "DashingGoblin": "Zombie Nhanh", "FlyingEye": "Mắt Quái Vật",
+                    "Mushroom": "Nấm Độc", "Skeleton": "Bộ Xương", "BigFlyingEye": "Mắt Khổng Lồ",
+                    "OldGuardian": "Old Guardian", "NightTerror": "Night Terror", "EvilWizard": "Phù Thủy"
+                }.get(killer, killer)
+                elapsed_ms = pygame.time.get_ticks() - self.game_start_time
+                self.session_stats = {
+                    "kills": self.kill_count,
+                    "money": self.money,
+                    "money_spent": getattr(self, 'money_spent', 0),
+                    "saved": self.saved_npcs,
+                    "killer": killer_display,
+                    "chapter": self.chapter.title if self.chapter else "?",
+                    "chapter_idx": self.chapter_index,
+                    "survived_ms": elapsed_ms,
+                }
+                self.end_reason = f"Bị {killer_display} kết liễu."
                 self.state = "lose"
                 sound_manager.play_music("nhac_that_bai")
 
@@ -2096,6 +2121,16 @@ class Game:
                 # Final chapter — trigger win state
                 self.state = "win"
                 self.end_reason = "Bạn đã thoát thành công khỏi tòa nhà!"
+                elapsed_ms = pygame.time.get_ticks() - self.game_start_time
+                self.session_stats = {
+                    "kills": self.kill_count,
+                    "money": self.money,
+                    "money_spent": getattr(self, 'money_spent', 0),
+                    "saved": self.saved_npcs,
+                    "chapter": self.chapter.title if self.chapter else "?",
+                    "chapter_idx": self.chapter_index,
+                    "survived_ms": elapsed_ms,
+                }
 
     def spawn_particles(self, x, y, color, count=5):
         for _ in range(count):
@@ -3198,13 +3233,252 @@ class Game:
             "quit": btn_quit,
         }
 
+    def _fmt_time(self, ms):
+        s = ms // 1000
+        m, s = divmod(s, 60)
+        h, m = divmod(m, 60)
+        if h:
+            return f"{h}h {m:02d}m {s:02d}s"
+        return f"{m:02d}m {s:02d}s"
+
+    def _rank_from_kills(self, kills):
+        if kills >= 100: return "S", (255, 215, 0)
+        if kills >= 60:  return "A", (100, 220, 100)
+        if kills >= 30:  return "B", (80, 160, 255)
+        if kills >= 10:  return "C", (200, 200, 200)
+        return "D", (180, 100, 100)
+
     def draw_end_screen(self):
-        screen.fill((10, 10, 14))
-        title = "THOÁT THÀNH CÔNG" if self.state == "win" else "THẤT BẠI"
-        color = GREEN if self.state == "win" else RED
-        screen.blit(self.font_title.render(title, True, color), (110, 110))
-        screen.blit(self.font.render(self.end_reason, True, WHITE), (110, 190))
-        screen.blit(self.font_big.render("Nhấn ENTER để chơi lại", True, YELLOW), (110, SCREEN_HEIGHT - 100))
+        if self.state == "win":
+            self.draw_victory_screen()
+        else:
+            self.draw_death_screen()
+
+    def draw_death_screen(self):
+        now = pygame.time.get_ticks()
+        t = now / 1000.0
+        stats = getattr(self, 'session_stats', {})
+
+        # 1. Animated dark red gradient background
+        screen.fill((6, 4, 6))
+        for i in range(SCREEN_HEIGHT):
+            r = int(18 + 22 * (i / SCREEN_HEIGHT))
+            g = int(4 + 6 * (i / SCREEN_HEIGHT))
+            b = int(6 + 8 * (i / SCREEN_HEIGHT))
+            pygame.draw.line(screen, (r, g, b), (0, i), (SCREEN_WIDTH, i))
+
+        # Blood rain particles
+        if not hasattr(self, '_death_particles'):
+            import random as _r
+            self._death_particles = [{'x': _r.randint(0, SCREEN_WIDTH), 'y': _r.randint(-SCREEN_HEIGHT, SCREEN_HEIGHT),
+                                       'speed': _r.uniform(3, 8), 'len': _r.randint(8, 24), 'alpha': _r.randint(60, 160)} for _ in range(80)]
+        for p in self._death_particles:
+            p['y'] += p['speed']
+            if p['y'] > SCREEN_HEIGHT + 30:
+                import random as _r
+                p['y'] = -30
+                p['x'] = _r.randint(0, SCREEN_WIDTH)
+            rs = pygame.Surface((2, p['len']), pygame.SRCALPHA)
+            rs.fill((180, 20, 20, p['alpha']))
+            screen.blit(rs, (int(p['x']), int(p['y'])))
+
+        # Red vignette pulse
+        vign = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        for i in range(80):
+            alpha = int(150 * (1 - i/80) * (0.6 + 0.4 * abs(math.sin(t * 0.7))))
+            pygame.draw.rect(vign, (180, 0, 0, alpha), (i, i, SCREEN_WIDTH - i*2, SCREEN_HEIGHT - i*2), 1)
+        screen.blit(vign, (0, 0))
+
+        # 2. Skull icon (procedural)
+        cx, cy = SCREEN_WIDTH // 2, 155
+        skull_a = int(220 + 35 * math.sin(t * 1.5))
+        sk = pygame.Surface((130, 130), pygame.SRCALPHA)
+        pygame.draw.circle(sk, (200, 30, 30, skull_a), (65, 55), 42)
+        pygame.draw.rect(sk, (200, 30, 30, skull_a), (32, 80, 66, 32), border_radius=8)
+        pygame.draw.circle(sk, (6, 4, 6, 255), (48, 52), 11)   # eye L
+        pygame.draw.circle(sk, (6, 4, 6, 255), (82, 52), 11)   # eye R
+        # nose
+        pygame.draw.polygon(sk, (6, 4, 6, 255), [(60, 60), (70, 60), (65, 73)])
+        # teeth
+        for i in range(4):
+            pygame.draw.rect(sk, (6, 4, 6, 255), (39 + i*13, 90, 9, 16), border_radius=3)
+        screen.blit(sk, (cx - 65, cy - 65))
+
+        # 3. GAME OVER with glow
+        glow_a = int(160 + 80 * math.sin(t * 2))
+        gs = self.font_title.render("GAME OVER", True, (220, 40, 40))
+        gs.set_alpha(glow_a)
+        go = self.font_title.render("GAME OVER", True, (255, 80, 80))
+        go_rect = go.get_rect(centerx=SCREEN_WIDTH // 2, y=228)
+        screen.blit(gs, (go_rect.x + 5, go_rect.y + 5))
+        screen.blit(go, go_rect)
+
+        # 4. Stats panel (glassmorphism dark red)
+        pw, ph = min(600, SCREEN_WIDTH - 40), 310
+        px, py = SCREEN_WIDTH // 2 - pw // 2, 316
+        panel = pygame.Surface((pw, ph), pygame.SRCALPHA)
+        panel.fill((20, 8, 10, 220))
+        screen.blit(panel, (px, py))
+        pygame.draw.rect(screen, (180, 30, 30), (px, py, pw, ph), 2, border_radius=10)
+
+        hdr = self.font_big.render("━━  TỔNG KẾT TRẬN  ━━", True, (255, 100, 80))
+        screen.blit(hdr, hdr.get_rect(centerx=SCREEN_WIDTH // 2, y=py + 16))
+        pygame.draw.line(screen, (180, 30, 30), (px + 30, py + 56), (px + pw - 30, py + 56), 1)
+
+        killer  = stats.get("killer", "Zombie")
+        kills   = stats.get("kills", self.kill_count)
+        money   = stats.get("money", self.money)
+        spent   = stats.get("money_spent", getattr(self, 'money_spent', 0))
+        saved   = stats.get("saved", self.saved_npcs)
+        chapter = stats.get("chapter", "?")
+        surv    = self._fmt_time(stats.get("survived_ms", 0))
+
+        rows = [
+            ("☠  Kẻ kết liễu",    killer,         (255, 80,  80)),
+            ("⚔  Quái đã diệt",   str(kills),     (255, 160, 60)),
+            ("🕐  Thời gian sống", surv,           (100, 210, 255)),
+            ("💰  Tiền tích lũy",  f"{money} xu",  (255, 220, 60)),
+            ("🛒  Tiền đã tiêu",   f"{spent} xu",  (200, 140, 220)),
+            ("🧑‍🤝‍🧑 NPC đã cứu",    str(saved),     (100, 220, 140)),
+            ("📍  Chương",         chapter,        (160, 180, 255)),
+        ]
+        ry = py + 70
+        for label, val, col in rows:
+            ls = self.font.render(label, True, (180, 160, 160))
+            vs = self.font.render(val,   True, col)
+            screen.blit(ls, (px + 36, ry))
+            screen.blit(vs, (px + pw - vs.get_width() - 36, ry))
+            ry += 31
+
+        # 5. Flashing prompt
+        pa = int(200 + 55 * math.sin(t * 3))
+        prompt = self.font_big.render("[ ENTER ]  Quay về Sảnh", True, YELLOW)
+        prompt.set_alpha(pa)
+        screen.blit(prompt, prompt.get_rect(centerx=SCREEN_WIDTH // 2, y=SCREEN_HEIGHT - 68))
+
+    def draw_victory_screen(self):
+        now = pygame.time.get_ticks()
+        t = now / 1000.0
+        stats = getattr(self, 'session_stats', {})
+
+        # 1. Deep night-to-dawn gradient
+        for i in range(SCREEN_HEIGHT):
+            pct = i / SCREEN_HEIGHT
+            r = int(8  + 30 * pct)
+            g = int(10 + 25 * pct)
+            b = int(25 + 45 * pct)
+            pygame.draw.line(screen, (r, g, b), (0, i), (SCREEN_WIDTH, i))
+
+        # Golden radial rays
+        ray_surf = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        rcx, rcy = SCREEN_WIDTH // 2, -40
+        for angle in range(0, 360, 15):
+            rad = math.radians(angle + t * 10)
+            length = SCREEN_HEIGHT * 1.8
+            ex = int(rcx + math.cos(rad) * length)
+            ey = int(rcy + math.sin(rad) * length)
+            alpha = int(15 + 10 * math.sin(t * 1.5 + math.radians(angle)))
+            pygame.draw.line(ray_surf, (255, 200, 60, alpha), (rcx, rcy), (ex, ey), 3)
+        screen.blit(ray_surf, (0, 0))
+
+        # Gold particles rising
+        if not hasattr(self, '_victory_particles'):
+            import random as _r
+            self._victory_particles = [
+                {'x': _r.randint(0, SCREEN_WIDTH), 'y': _r.randint(0, SCREEN_HEIGHT),
+                 'vy': _r.uniform(-2.5, -0.8), 'vx': _r.uniform(-0.4, 0.4),
+                 'size': _r.randint(2, 5), 'alpha': _r.randint(120, 220),
+                 'col': _r.choice([(255, 215, 0), (255, 180, 40), (255, 255, 140), (180, 240, 255)])}
+                for _ in range(120)]
+        for p in self._victory_particles:
+            p['y'] += p['vy']
+            p['x'] += p['vx']
+            if p['y'] < -10:
+                import random as _r
+                p['y'] = SCREEN_HEIGHT + 10
+                p['x'] = _r.randint(0, SCREEN_WIDTH)
+            ps = pygame.Surface((p['size']*2, p['size']*2), pygame.SRCALPHA)
+            pygame.draw.circle(ps, (*p['col'], p['alpha']), (p['size'], p['size']), p['size'])
+            screen.blit(ps, (int(p['x']), int(p['y'])))
+
+        # 2. Animated wings
+        wing_cx, wing_cy = SCREEN_WIDTH // 2, 195
+        wing_wave = math.sin(t * 2.2) * 8
+        for side in (-1, 1):
+            for fi in range(8):
+                bx = wing_cx + side * (55 + fi * 17)
+                by = wing_cy + 10 + wing_wave * side
+                angle = math.radians(15 + fi * 14 + math.sin(t * 2) * 6 * side)
+                flen = 125 - fi * 11
+                tip_x = int(bx + side * math.cos(angle) * flen)
+                tip_y = int(by - math.sin(angle) * flen * 0.8)
+                alpha_f = max(40, 230 - fi * 25)
+                col_f   = (255 - fi * 8, max(140, 200 - fi * 6), 60, alpha_f)
+                ws = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+                pygame.draw.line(ws, col_f, (bx, by), (tip_x, tip_y), max(2, 9 - fi))
+                screen.blit(ws, (0, 0))
+
+        # 3. VICTORY title with glow
+        ga = int(160 + 80 * math.sin(t * 2))
+        gs = self.font_title.render("VICTORY!", True, (255, 215, 0))
+        gs.set_alpha(ga)
+        vic = self.font_title.render("VICTORY!", True, (255, 245, 120))
+        vr = vic.get_rect(centerx=SCREEN_WIDTH // 2, y=95)
+        screen.blit(gs, (vr.x + 6, vr.y + 6))
+        screen.blit(vic, vr)
+
+        # 4. Rank badge
+        kills = stats.get("kills", self.kill_count)
+        rank, rank_col = self._rank_from_kills(kills)
+        rb = pygame.Surface((100, 100), pygame.SRCALPHA)
+        pygame.draw.circle(rb, (*rank_col, 50), (50, 50), 50)
+        pygame.draw.circle(rb, (*rank_col, 220), (50, 50), 50, 5)
+        screen.blit(rb, (SCREEN_WIDTH // 2 - 50, 188))
+        rt = self.font_title.render(rank, True, rank_col)
+        screen.blit(rt, rt.get_rect(centerx=SCREEN_WIDTH // 2, centery=238))
+        rl = self.font_small.render("RANK", True, (200, 200, 200))
+        screen.blit(rl, rl.get_rect(centerx=SCREEN_WIDTH // 2, y=288))
+
+        # 5. Stats panel (golden glassmorphism)
+        pw, ph = min(580, SCREEN_WIDTH - 40), 268
+        px, py = SCREEN_WIDTH // 2 - pw // 2, 316
+        panel = pygame.Surface((pw, ph), pygame.SRCALPHA)
+        panel.fill((8, 16, 8, 225))
+        screen.blit(panel, (px, py))
+        pygame.draw.rect(screen, (80, 220, 80), (px, py, pw, ph), 2, border_radius=10)
+
+        hdr = self.font_big.render("━━  KẾT QUẢ NHIỆM VỤ  ━━", True, (100, 255, 120))
+        screen.blit(hdr, hdr.get_rect(centerx=SCREEN_WIDTH // 2, y=py + 16))
+        pygame.draw.line(screen, (80, 220, 80), (px + 30, py + 56), (px + pw - 30, py + 56), 1)
+
+        money   = stats.get("money", self.money)
+        spent   = stats.get("money_spent", getattr(self, 'money_spent', 0))
+        saved   = stats.get("saved", self.saved_npcs)
+        chapter = stats.get("chapter", "?")
+        surv    = self._fmt_time(stats.get("survived_ms", 0))
+
+        rows = [
+            ("⚔  Quái đã diệt",  str(kills),     (255, 200, 60)),
+            ("🕐  Thời gian",     surv,           (100, 210, 255)),
+            ("💰  Tiền thu được", f"{money} xu",  (255, 220, 60)),
+            ("🛒  Tiền đã tiêu",  f"{spent} xu",  (200, 140, 220)),
+            ("🧑‍🤝‍🧑 NPC đã cứu",   str(saved),     (100, 220, 140)),
+            ("📍  Chương",        chapter,        (180, 180, 255)),
+        ]
+        ry = py + 70
+        for label, val, col in rows:
+            ls = self.font.render(label, True, (160, 200, 160))
+            vs = self.font.render(val,   True, col)
+            screen.blit(ls, (px + 36, ry))
+            screen.blit(vs, (px + pw - vs.get_width() - 36, ry))
+            ry += 32
+
+        # 6. Flashing prompt
+        pa = int(200 + 55 * math.sin(t * 3))
+        prompt = self.font_big.render("[ ENTER ]  Quay về Sảnh", True, (255, 215, 0))
+        prompt.set_alpha(pa)
+        screen.blit(prompt, prompt.get_rect(centerx=SCREEN_WIDTH // 2, y=SCREEN_HEIGHT - 68))
+
 
     def draw_npc_portrait(self, x, y, color):
         """Draw a custom-made NPC portrait using shapes."""
@@ -3890,8 +4164,18 @@ class Game:
         
         if self.state in ["win", "lose"] and event.type == pygame.KEYDOWN:
             if event.key == pygame.K_RETURN:
+                # Reset particles for next run
+                if hasattr(self, '_death_particles'):
+                    del self._death_particles
+                if hasattr(self, '_victory_particles'):
+                    del self._victory_particles
+                # Return to lobby
+                chapter_idx = self.chapter_index
                 self.__init__()
-                self.state = "playing"
+                self.chapter_index = chapter_idx
+                self.state = "menu"
+                self.menu_start_time = pygame.time.get_ticks()
+                sound_manager.play_music("nhac_cho_sanh")
 
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             self.mouse_down = True
