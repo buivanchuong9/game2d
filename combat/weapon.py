@@ -156,6 +156,7 @@ class Weapon:
         reserve_ammo=90,
     ):
         self.name = name
+        self.image_path = image_path
         self.fire_rate = fire_rate  # Shots per second
         self.reload_time = reload_time  # Seconds
         self.last_shot_time = 0

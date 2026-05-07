@@ -1,12 +1,13 @@
 #Code for Main player
 
 import pygame
+from systems.sound_manager import sound_manager
 
 class Player:
     def __init__(self, x, y):
         self.x = x
         self.y = y
-        self.speed = 5  # Movement speed
+        self.speed = 4  # Reduced base speed from 5
         self.dx = 0
         self.dy = 0
         self.health = 300
@@ -16,6 +17,11 @@ class Player:
         self.stamina = 100
         self.max_stamina = 100
         self.poison_timer = 0
+        
+        # Hit effects
+        self.hit_timer = 0
+        self.slow_timer = 0
+        self.slow_multiplier = 1.0
 
         # Load the sprite sheet
         self.sprite_sheet = pygame.image.load("Sprites/Sprites_Player/mega_scientist_walk.png").convert_alpha()
@@ -48,42 +54,50 @@ class Player:
             amount -= reduction
         self.health -= amount
 
+    def on_hit(self, damage):
+        """Called when the player is hit by an enemy attack."""
+        if self.hit_timer > 0:
+            return # Invulnerability or skip if already hit recently? 
+                   # User didn't ask for invulnerability, but let's prevent sound spam.
+        
+        self.take_damage(damage)
+        self.hit_timer = 15 # Flash for 15 frames
+        self.slow_timer = 40 # Slow down for 40 frames
+        self.slow_multiplier = 0.5 # 50% speed reduction
+        
+        # Play hit sound here
+        sound_manager.play("nhan_vat_trung_don")
+
     def update(self, keys, blocked_tiles=None, map_width=None, map_height=None, tile_size=16):
         """Update player position, collision and animation based on input."""
         dx, dy = 0, 0  # Movement vector components
-        moving = False
         running = keys[pygame.K_LSHIFT] and self.stamina > 0
 
-        current_speed = self.speed * 1.6 if running else self.speed
+        # Apply slow effect
+        current_base_speed = self.speed * self.slow_multiplier
+        current_speed = current_base_speed * 1.6 if running else current_base_speed
+        
+        # Adjust animation speed based on movement state
+        dynamic_delay = 6 if running else 10
 
         # Movement logic
         #up-down 
         if keys[pygame.K_UP] or keys[pygame.K_w]:
             dy -= 1
             self.direction = "up"
-            moving = True
         elif keys[pygame.K_DOWN] or keys[pygame.K_s]:
             dy += 1
             self.direction = "down"
-            moving = True
         #left-right
         if keys[pygame.K_LEFT] or keys[pygame.K_a]:
             dx -= 1
             self.direction = "left"
-            moving = True
         elif keys[pygame.K_RIGHT] or keys[pygame.K_d]:
             dx += 1
             self.direction = "right"
-            moving = True
 
-        # Stamina logic
-        if moving:
-            if running:
-                self.stamina = max(0, self.stamina - 0.5)
-            else:
-                self.stamina = min(self.max_stamina, self.stamina + 0.2)
-        else:
-            self.stamina = min(self.max_stamina, self.stamina + 0.4)
+        # Stamina logic - only consume/recover based on actual movement effort
+        # Note: actually_moved is calculated after the axis movement below
 
         # Normalize the movement vector
         if dx != 0 or dy != 0:  # If there's movement
@@ -94,31 +108,59 @@ class Player:
         self.dx = dx * current_speed
         self.dy = dy * current_speed
 
+        old_x, old_y = self.x, self.y
         self._move_axis(self.dx, 0, blocked_tiles, map_width, map_height, tile_size)
         self._move_axis(0, self.dy, blocked_tiles, map_width, map_height, tile_size)
 
+        # Check if we actually moved in the world (not blocked by walls)
+        actually_moved = (abs(self.x - old_x) > 0.1 or abs(self.y - old_y) > 0.1)
+
+        # Apply Stamina logic after we know if movement actually happened
+        if actually_moved:
+            if running:
+                self.stamina = max(0, self.stamina - 0.5)
+            else:
+                self.stamina = min(self.max_stamina, self.stamina + 0.2)
+        else:
+            self.stamina = min(self.max_stamina, self.stamina + 0.4)
+
+        # Handle hit effects timers
+        if self.hit_timer > 0:
+            self.hit_timer -= 1
+        
+        if self.slow_timer > 0:
+            self.slow_timer -= 1
+            if self.slow_timer == 0:
+                self.slow_multiplier = 1.0 # Recover speed
+        
         # Handle poison
         if self.poison_timer > 0:
             self.poison_timer -= 1
             if self.poison_timer % 60 == 0:
                 self.health -= 1
 
-        # Update animation frame
-        if moving:
+        # Update animation frame and footstep sounds
+        # Only animate and play sounds if the player is actually moving (not stuck against a wall)
+        if actually_moved:
+            # If we just started moving, trigger the first frame and sound immediately for responsiveness
+            if self.current_frame == 0 and self.frame_timer == 0:
+                self.frame_timer = dynamic_delay
+                
             self.frame_timer += 1
-            if self.frame_timer >= self.frame_delay:
+            if self.frame_timer >= dynamic_delay:
                 self.frame_timer = 0
                 self.current_frame = (self.current_frame + 1) % len(self.frames[self.direction])
                 
-                # Phát âm thanh bước chân khi chuyển frame (thường là frame 1 và 5 trong bộ 8 frame)
+                # Play footstep sound on specific frames (1 and 5 in the 8-frame walk cycle)
                 if self.current_frame in [1, 5]:
-                    from systems.sound_manager import sound_manager
                     if running:
                         sound_manager.play("nhan_vat_chay_nhanh")
                     else:
                         sound_manager.play("nhan_vat_chay")
         else:
+            # When stopping, reset to idle frame and clear timer
             self.current_frame = 0  # Idle state resets to the first frame
+            self.frame_timer = 0
 
     def _move_axis(self, dx, dy, blocked_tiles, map_width, map_height, tile_size):
         self.x += dx
@@ -170,6 +212,17 @@ class Player:
     def draw(self, surface):
         # Draw the actual player sprite
         sprite = self.frames[self.direction][self.current_frame]
+        
+        # Flash white effect
+        if self.hit_timer > 0:
+            # Create a white silhouette
+            white_surf = pygame.Surface(sprite.get_size(), pygame.SRCALPHA)
+            white_surf.fill((255, 255, 255, 180)) # Semi-transparent white
+            sprite = sprite.copy()
+            sprite.blit(white_surf, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+            # Alternatively, use a simpler fill for better visibility
+            # sprite.fill((255, 255, 255, 255), special_flags=pygame.BLEND_RGB_ADD)
+            
         sprite_rect = sprite.get_rect(center=(self.x, self.y))
         surface.blit(sprite, sprite_rect.topleft)
 
