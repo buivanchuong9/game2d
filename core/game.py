@@ -412,19 +412,8 @@ class Game:
         self.camera = Camera(SCREEN_WIDTH, SCREEN_HEIGHT, SIDEBAR_WIDTH)
         self.player = Player(400, 400)
         self.weapon_manager = WeaponManager()
-        def find_nearest_enemy(self, radius=300):
-            px, py = self.player.x, self.player.y
-            nearest = None
-            min_dist = radius
+        self.find_nearest_enemy = self._find_nearest_enemy_method
 
-            for e in self.story_enemies:
-                ex, ey = e.pos
-                dist = math.hypot(ex - px, ey - py)
-                if dist < min_dist:
-                    min_dist = dist
-                    nearest = e
-
-            return nearest
         # Wire weapon SFX events (shot/reload)
         def _weapon_event(evt, weapon):
             wname = (getattr(weapon, "name", "") or "").lower()
@@ -637,6 +626,15 @@ class Game:
             self.crosshair_surf = safe_load("Sprites/Sprites_Effect/tam_ban_fixed.png", (64, 64))
 
         self.set_chapter(0)
+
+        # --- Cấu hình Cài đặt (Settings) ---
+        self.show_settings = False
+        self.vol_sfx = 0.5
+        self.vol_music = 0.4
+        self.sensitivity = 1.0
+        self.aim_assist = True
+        self.settings_buttons = {}
+        # Các thuật toán hiện có (self.hint_modes đã có: ["BFS", "DFS", "SAFE", "A*"])
 
     def discover_map_backgrounds(self):
         map_dir = os.path.join(BASE_DIR, "Sprites", "Sprites_Environment", "maps")
@@ -1850,6 +1848,12 @@ class Game:
             mx, my = pygame.mouse.get_pos()
             world_mx, world_my = self.camera.screen_to_world(mx, my)
             
+            # --- Aim Assist Logic ---
+            if getattr(self, "aim_assist", False):
+                nearest = self.find_nearest_enemy(radius=250)
+                if nearest:
+                    world_mx, world_my = nearest.pos
+
             shot_fired = self.weapon_manager.update(
                 self.player.x,
                 self.player.y,
@@ -2435,6 +2439,8 @@ class Game:
             self.draw_pause()
         elif self.state in {"win", "lose"}:
             self.draw_end_screen()
+        if getattr(self, "show_settings", False):
+            self.draw_settings()
         pygame.display.flip()
 
     def draw_world(self):
@@ -2869,6 +2875,7 @@ class Game:
                 yy += 16
 
     def draw_overlays(self):
+
         if pygame.time.get_ticks() < self.objective_flash_until and not self.dialog_npc and not self.next_chapter_ready:
             flash_rect = pygame.Rect(24, 22, 320, 54)
             self.draw_card(flash_rect, YELLOW)
@@ -3417,26 +3424,119 @@ class Game:
 
         # Buttons
         bx = panel.x + 60
-        by = panel.y + 120
+        by = panel.y + 100
         bw = panel.width - 120
-        bh = 74
-        gap = 22
+        bh = 64
+        gap = 14
         btn_continue = pygame.Rect(bx, by, bw, bh)
-        btn_menu = pygame.Rect(bx, by + (bh + gap), bw, bh)
-        btn_quit = pygame.Rect(bx, by + 2 * (bh + gap), bw, bh)
+        btn_settings = pygame.Rect(bx, by + (bh + gap), bw, bh)
+        btn_menu = pygame.Rect(bx, by + 2 * (bh + gap), bw, bh)
+        btn_quit = pygame.Rect(bx, by + 3 * (bh + gap), bw, bh)
+        
         draw_btn(btn_continue, "TIẾP TỤC", GREEN)
+        draw_btn(btn_settings, "CÀI ĐẶT", YELLOW)
         draw_btn(btn_menu, "VỀ MENU", CYAN)
         draw_btn(btn_quit, "THOÁT GAME", RED)
 
         hint = "ESC: tiếp tục | Click nút để chọn"
-        screen.blit(self.font_small.render(hint, True, SOFT), (panel.x + 60, panel.bottom - 54))
+        screen.blit(self.font_small.render(hint, True, SOFT), (panel.x + 60, panel.bottom - 44))
 
         # Store for click handling
         self.pause_buttons = {
             "continue": btn_continue,
+            "settings": btn_settings,
             "menu": btn_menu,
             "quit": btn_quit,
         }
+
+    def draw_settings(self):
+        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        overlay.fill((10, 8, 12, 230))
+        screen.blit(overlay, (0, 0))
+
+        # Panel settings
+        w, h = 600, 580
+        panel = pygame.Rect((SCREEN_WIDTH - w) // 2, (SCREEN_HEIGHT - h) // 2, w, h)
+        self.draw_card(panel, YELLOW, title="CÀI ĐẶT HỆ THỐNG", subtitle="Điều chỉnh âm lượng và độ nhạy")
+
+        # 1. Sliders (Volume SFX, Music, Sensitivity)
+        start_y = panel.y + 100
+        labels = [("Âm lượng SFX", self.vol_sfx), ("Âm lượng Nhạc", self.vol_music), ("Độ nhạy ngắm", self.sensitivity / 2.0)]
+        self.settings_buttons = {}
+        
+        for i, (label, val) in enumerate(labels):
+            yy = start_y + i * 80
+            screen.blit(self.font.render(label, True, WHITE), (panel.x + 60, yy))
+            
+            # Slider background
+            slider_rect = pygame.Rect(panel.x + 250, yy + 10, 280, 10)
+            pygame.draw.rect(screen, (40, 44, 52), slider_rect, border_radius=5)
+            
+            # Handle position
+            handle_x = slider_rect.x + int(val * slider_rect.width)
+            handle_rect = pygame.Rect(handle_x - 10, yy, 20, 30)
+            pygame.draw.rect(screen, YELLOW, handle_rect, border_radius=5)
+            
+            # Store slider for click
+            self.settings_buttons[f"slider_{i}"] = slider_rect
+            # Display percentage
+            screen.blit(self.font_small.render(f"{int(val*100)}%", True, SOFT), (slider_rect.right + 15, yy + 5))
+
+        # 2. Toggles (Aim Assist)
+        yy = start_y + 240
+        screen.blit(self.font.render("Hỗ trợ ngắm", True, WHITE), (panel.x + 60, yy))
+        toggle_rect = pygame.Rect(panel.x + 250, yy, 60, 30)
+        pygame.draw.rect(screen, GREEN if self.aim_assist else GRAY, toggle_rect, border_radius=15)
+        knob_x = toggle_rect.right - 25 if self.aim_assist else toggle_rect.x + 5
+        pygame.draw.circle(screen, WHITE, (knob_x + 10, yy + 15), 12)
+        self.settings_buttons["aim_assist"] = toggle_rect
+
+        # 3. Algorithm Selection (Checkboxes/Radio)
+        yy += 60
+        screen.blit(self.font.render("Thuật toán tìm đường", True, WHITE), (panel.x + 60, yy))
+        for i, mode in enumerate(self.hint_modes):
+            mx = panel.x + 60 + (i % 2) * 220
+            my = yy + 40 + (i // 2) * 45
+            box_rect = pygame.Rect(mx, my, 30, 30)
+            pygame.draw.rect(screen, (40, 44, 52), box_rect, border_radius=5)
+            if self.hint_mode_index == i:
+                pygame.draw.rect(screen, YELLOW, box_rect.inflate(-10, -10), border_radius=3)
+            screen.blit(self.font.render(mode, True, WHITE), (mx + 45, my + 2))
+            self.settings_buttons[f"algo_{i}"] = box_rect
+
+        # Back Button
+        btn_back = pygame.Rect(panel.centerx - 100, panel.bottom - 80, 200, 50)
+        pygame.draw.rect(screen, CARD_ALT, btn_back, border_radius=10)
+        pygame.draw.rect(screen, YELLOW, btn_back, 2, border_radius=10)
+        txt = self.font.render("QUAY LẠI", True, WHITE)
+        screen.blit(txt, txt.get_rect(center=btn_back.center))
+        self.settings_buttons["back"] = btn_back
+
+    def handle_settings_click(self, mx, my):
+        for key, rect in self.settings_buttons.items():
+            if rect.collidepoint(mx, my):
+                sound_manager.play("nut_bam")
+                if key.startswith("slider_"):
+                    # Calculate new value
+                    val = (mx - rect.x) / rect.width
+                    val = max(0.0, min(1.0, val))
+                    idx = int(key.split("_")[1])
+                    if idx == 0: 
+                        self.vol_sfx = val
+                        # Assuming SoundManager has this or similar
+                        if hasattr(sound_manager, "set_sfx_volume"):
+                            sound_manager.set_sfx_volume(val)
+                    elif idx == 1:
+                        self.vol_music = val
+                        sound_manager.set_music_volume(val)
+                    elif idx == 2:
+                        self.sensitivity = val * 2.0
+                elif key == "aim_assist":
+                    self.aim_assist = not self.aim_assist
+                elif key.startswith("algo_"):
+                    self.hint_mode_index = int(key.split("_")[1])
+                elif key == "back":
+                    self.show_settings = False
 
     def _fmt_time(self, ms):
         s = ms // 1000
@@ -4179,6 +4279,8 @@ class Game:
         else:
             pygame.mouse.set_visible(True)
             
+        if getattr(self, "show_settings", False):
+            self.draw_settings()
         pygame.display.flip()
 
     def draw_mission_panel(self):
@@ -4231,6 +4333,15 @@ class Game:
         if event.type == pygame.QUIT:
             pygame.quit()
             sys.exit()
+
+        # Settings Handling (Blocking other inputs)
+        if getattr(self, "show_settings", False):
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                mx, my = pygame.mouse.get_pos()
+                self.handle_settings_click(mx, my)
+            elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                self.show_settings = False
+            return
         
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_ESCAPE:
@@ -4416,6 +4527,9 @@ class Game:
                 if btns.get("continue") and btns["continue"].collidepoint(mx, my):
                     sound_manager.play("nut_bam")
                     self.state = "playing"
+                elif btns.get("settings") and btns["settings"].collidepoint(mx, my):
+                    sound_manager.play("nut_bam")
+                    self.show_settings = True
                 elif btns.get("menu") and btns["menu"].collidepoint(mx, my):
                     sound_manager.play("nut_bam")
                     self.state = "menu"
@@ -4431,6 +4545,20 @@ class Game:
 
         if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
             self.mouse_down = False
+
+    def _find_nearest_enemy_method(self, radius=300):
+        px, py = self.player.x, self.player.y
+        nearest = None
+        min_dist = radius
+
+        for e in self.story_enemies:
+            ex, ey = e.pos
+            dist = math.hypot(ex - px, ey - py)
+            if dist < min_dist:
+                min_dist = dist
+                nearest = e
+
+        return nearest
 
 
 def main():
