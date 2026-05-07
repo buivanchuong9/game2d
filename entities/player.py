@@ -73,12 +73,13 @@ class Player:
         dx, dy = 0, 0  # Movement vector components
         running = keys[pygame.K_LSHIFT] and self.stamina > 0
 
-        # Apply slow effect
-        current_base_speed = self.speed * self.slow_multiplier
+        # Apply slow effect and Frenzy effect
+        frenzy_mult = 1.3 if getattr(self, "frenzy_active", False) else 1.0
+        current_base_speed = self.speed * self.slow_multiplier * frenzy_mult
         current_speed = current_base_speed * 1.6 if running else current_base_speed
         
         # Adjust animation speed based on movement state
-        dynamic_delay = 6 if running else 10
+        dynamic_delay = 4 if (running or frenzy_mult > 1.0) else 10
 
         # Movement logic
         #up-down 
