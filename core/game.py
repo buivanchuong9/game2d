@@ -554,7 +554,7 @@ class Game:
         self.set_map_background_by_index(0)
         self.exit_path = []
         self.exit_path_timer = 0
-        self.hint_modes = ["BFS", "DFS", "SAFE", "A*"]
+        self.hint_modes = ["BFS", "DFS", "HEURISTIC", "A*"]
         self.hint_mode_index = 0
         
         self.popup = ""
@@ -654,7 +654,7 @@ class Game:
         self.sensitivity = 1.0
         self.aim_assist = True
         self.settings_buttons = {}
-        # Các thuật toán hiện có (self.hint_modes đã có: ["BFS", "DFS", "SAFE", "A*"])
+        # Các thuật toán hiện có (self.hint_modes đã có: ["BFS", "DFS", "HEURISTIC", "A*"])
 
     def discover_map_backgrounds(self):
         map_dir = os.path.join(BASE_DIR, "Sprites", "Sprites_Environment", "maps")

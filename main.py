@@ -580,7 +580,7 @@ class Game:
         self.set_map_background_by_index(0)
         self.exit_path = []
         self.exit_path_timer = 0
-        self.hint_modes = ["BFS", "DFS", "SAFE", "A*"]
+        self.hint_modes = ["BFS", "DFS", "HEURISTIC", "A*"]
         self.hint_mode_index = 0
         
         self.popup = ""
@@ -2351,9 +2351,16 @@ class Game:
         if start and goal:
             mode = self.hint_modes[self.hint_mode_index]
             if mode == "DFS":
-                from pathfinding import dfs
+                from systems.pathfinding import dfs
                 self.exit_path = dfs(start, goal, GRID_SIZE, GRID_SIZE, blocked)
+            elif mode == "HEURISTIC":
+                from systems.pathfinding import heuristic_search
+                self.exit_path = heuristic_search(start, goal, GRID_SIZE, GRID_SIZE, blocked)
+            elif mode == "A*":
+                from systems.pathfinding import astar
+                self.exit_path = astar(start, goal, GRID_SIZE, GRID_SIZE, blocked)
             else:
+                from systems.pathfinding import bfs
                 self.exit_path = bfs(start, goal, GRID_SIZE, GRID_SIZE, blocked)
 
     def draw_path_overlay(self, surface):
