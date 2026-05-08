@@ -1,7 +1,8 @@
 import pygame
 import math
 import random
-from queue import PriorityQueue
+from collections import deque
+import heapq
 from entities import player
 
 
@@ -386,16 +387,16 @@ class Enemy:
         if start == goal:
             return []
 
-        frontier = PriorityQueue()
-        frontier.put((0, start))
+        frontier = []
+        heapq.heappush(frontier, (0, start))
         came_from = {}
         cost_so_far = {}
         came_from[start] = None
         cost_so_far[start] = 0
         
         found = False
-        while not frontier.empty():
-            current = frontier.get()[1]
+        while frontier:
+            _, current = heapq.heappop(frontier)
             
             if current == goal:
                 found = True
@@ -406,7 +407,7 @@ class Enemy:
                 if next not in cost_so_far or new_cost < cost_so_far[next]:
                     cost_so_far[next] = new_cost
                     priority = new_cost + self.heuristic(goal, next)
-                    frontier.put((priority, next))
+                    heapq.heappush(frontier, (priority, next))
                     came_from[next] = current
         
         if not found:
