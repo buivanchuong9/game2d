@@ -112,7 +112,7 @@ CARD_WEAPON_GRENADE = safe_load("Shop_Cards/Card_Weapon_GrenadeLauncher.png", (7
 CARD_WEAPON_POISON = safe_load("Shop_Cards/Card_Weapon_PoisonGun.png", (72, 96))
 CARD_WEAPON_TAESAR = safe_load("Shop_Cards/Card_Weapon_Taesar_Gun.png", (72, 96))
 CARD_BORDER = safe_load("Shop_Cards/Card_Border_1.png", (78, 102))
-BULLET_ICON = safe_load("Sprites/Sprites_Effect/Bullets/bullet_icon.png", (12, 28))
+BULLET_ICON = safe_load("Sprites/Sprites_Effect/Bullets/bullet_icon.png", (6, 15))
 CARD_PET_BIRD = safe_load("Shop_Cards/Card_Pet_BlueBird.png", (58, 78))
 CARD_PET_FOX = safe_load("Shop_Cards/Card_Pet_Fox.png", (58, 78))
 CARD_BUILD_MORTAR = safe_load("Shop_Cards/Card_Building_SuperMortar.png", (58, 78))
@@ -412,19 +412,8 @@ class Game:
         self.camera = Camera(SCREEN_WIDTH, SCREEN_HEIGHT, SIDEBAR_WIDTH)
         self.player = Player(400, 400)
         self.weapon_manager = WeaponManager()
-        def find_nearest_enemy(self, radius=300):
-            px, py = self.player.x, self.player.y
-            nearest = None
-            min_dist = radius
+        self.find_nearest_enemy = self._find_nearest_enemy_method
 
-            for e in self.story_enemies:
-                ex, ey = e.pos
-                dist = math.hypot(ex - px, ey - py)
-                if dist < min_dist:
-                    min_dist = dist
-                    nearest = e
-
-            return nearest
         # Wire weapon SFX events (shot/reload)
         def _weapon_event(evt, weapon):
             wname = (getattr(weapon, "name", "") or "").lower()
@@ -448,6 +437,19 @@ class Game:
 
             if evt == "shot":
                 sound_manager.play(f"ban_{wtype}" if wtype != "melee" else "chem")
+                # --- Screen shake / recoil per weapon type ---
+                recoil = {
+                    "melee":     (3, 80),
+                    "sung_luc":  (4, 90),
+                    "shotgun":   (9, 160),
+                    "tia":       (8, 130),
+                    "tieu_lien": (3, 70),
+                    "b40":       (14, 250),
+                    "sung_truong": (6, 110),
+                }.get(wtype, (4, 100))
+                intensity, duration = recoil
+                self.screen_shake_intensity = intensity
+                self.screen_shake_until = pygame.time.get_ticks() + duration
             elif evt in {"reload_start", "reload_complete"}:
                 sound_manager.play("thay_dan")
         self.weapon_manager.on_event = _weapon_event
@@ -467,6 +469,13 @@ class Game:
         self.frenzy_timer = 0
         self.frenzy_window_until = 0
         self.combo_shake_until = 0
+        # --- Screen FX state ---
+        self.screen_shake_x = 0          # current shake offset
+        self.screen_shake_y = 0
+        self.screen_shake_until = 0      # ms timestamp shake ends
+        self.screen_shake_intensity = 0  # pixels max
+        self.heartbeat_last = 0          # last heartbeat sfx time
+        self.heartbeat_interval = 800    # ms between beats
         # Finite wave per chapter (no infinite spawning)
         self.enemy_target_per_chapter = [10, 20, 30, 40, 50, 60, 70]
         self.enemies_remaining_to_spawn = 0
@@ -637,6 +646,15 @@ class Game:
             self.crosshair_surf = safe_load("Sprites/Sprites_Effect/tam_ban_fixed.png", (64, 64))
 
         self.set_chapter(0)
+
+        # --- Cấu hình Cài đặt (Settings) ---
+        self.show_settings = False
+        self.vol_sfx = 0.5
+        self.vol_music = 0.4
+        self.sensitivity = 1.0
+        self.aim_assist = True
+        self.settings_buttons = {}
+        # Các thuật toán hiện có (self.hint_modes đã có: ["BFS", "DFS", "SAFE", "A*"])
 
     def discover_map_backgrounds(self):
         map_dir = os.path.join(BASE_DIR, "Sprites", "Sprites_Environment", "maps")
@@ -1406,10 +1424,18 @@ class Game:
         self.queue_story_dialog("Survivor", self.chapter.intro_lines[0], self.chapter.chapter_color)
 
     def build_obstacle_grid(self):
-        grid = [[False for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]
+        # Cache: only rebuild when current_blocked changes (use a frozen-set fingerprint)
+        blocked_key = id(self.current_blocked)
+        cache = getattr(self, "_obstacle_grid_cache", None)
+        cache_key = getattr(self, "_obstacle_grid_key", None)
+        if cache is not None and cache_key == blocked_key:
+            return cache
+        grid = [[False] * GRID_SIZE for _ in range(GRID_SIZE)]
         for x, y in self.current_blocked:
             if 0 <= x < GRID_SIZE and 0 <= y < GRID_SIZE:
                 grid[y][x] = True
+        self._obstacle_grid_cache = grid
+        self._obstacle_grid_key = blocked_key
         return grid
 
     def queue_story_dialog(self, speaker, text, color=CYAN):
@@ -1850,6 +1876,12 @@ class Game:
             mx, my = pygame.mouse.get_pos()
             world_mx, world_my = self.camera.screen_to_world(mx, my)
             
+            # --- Aim Assist Logic ---
+            if getattr(self, "aim_assist", False):
+                nearest = self.find_nearest_enemy(radius=250)
+                if nearest:
+                    world_mx, world_my = nearest.pos
+
             shot_fired = self.weapon_manager.update(
                 self.player.x,
                 self.player.y,
@@ -1960,17 +1992,19 @@ class Game:
         self.enemies_remaining_to_spawn = max(0, self.enemies_remaining_to_spawn - 1)
 
     def update_enemies(self):
+        # Build obstacle grid ONCE per frame, reuse for all enemies
+        shared_obstacle_map = self.build_obstacle_grid()
+        now = pygame.time.get_ticks()
         for entry in self.story_enemies:
             enemy = entry.enemy
             # Enemy hit SFX (detect health drop since last loop)
-            now = pygame.time.get_ticks()
             cur_hp = getattr(enemy, "health", 0)
             if (not enemy.is_dead) and cur_hp < entry._last_health and now - entry._last_hit_sfx_at > 90:
                 entry._last_hit_sfx_at = now
                 sound_manager.play("quai_trung_dan")
             entry._last_health = cur_hp
 
-            enemy.obstacle_map = self.build_obstacle_grid()
+            enemy.obstacle_map = shared_obstacle_map
             enemy.update(self.player)
             enemy.x = max(TILE_SIZE, min(enemy.x, MAP_WIDTH - TILE_SIZE))
             enemy.y = max(TILE_SIZE, min(enemy.y, MAP_HEIGHT - TILE_SIZE))
@@ -2044,12 +2078,12 @@ class Game:
         self.combo_counter += 1
         self.frenzy_window_until = now + 3000 # 3 seconds to keep combo
         
-        # Feedback SFX
+        # Feedback SFX (Exclusively using combo.mp3 for milestones)
+        if self.combo_counter in [3, 5, 10, 15, 20]:
+            sound_manager.play("combo")
+            
         if self.combo_counter >= 10:
-            sound_manager.play("hoan_thanh")
             self.combo_shake_until = now + 500
-        elif self.combo_counter >= 3:
-            sound_manager.play("qua_man")
             
         # Spawn loot
         etile = (int(enemy.x // TILE_SIZE), int(enemy.y // TILE_SIZE))
@@ -2405,7 +2439,11 @@ class Game:
             return
             
         # Bright Cyan/Green that glows in the dark
-        color = (0, 255, 255) 
+        # Purple for the final escape chapter
+        if self.chapter and self.chapter.id == "escape":
+            color = (180, 0, 255) 
+        else:
+            color = (0, 255, 255) 
         points = []
         for x, y in self.exit_path:
             sx, sy = self.camera.world_to_screen(x * TILE_SIZE + 8, y * TILE_SIZE + 8)
@@ -2435,6 +2473,8 @@ class Game:
             self.draw_pause()
         elif self.state in {"win", "lose"}:
             self.draw_end_screen()
+        if getattr(self, "show_settings", False):
+            self.draw_settings()
         pygame.display.flip()
 
     def draw_world(self):
@@ -2450,7 +2490,7 @@ class Game:
         self.draw_path_overlay(screen)
         
         # HUD mission always visible
-        self.draw_mission_hud(screen)
+        # self.draw_mission_hud(screen)
 
     def draw_mission_hud(self, surface):
         """Always-visible mission HUD (no need to talk to NPC)."""
@@ -2469,7 +2509,7 @@ class Game:
         # Title + current objective (subtle)
         panel.blit(self.font_small.render("Quest", True, (220, 220, 230)), (12, 10))
         obj = self.objective_label()
-        panel.blit(self.font_small.render(obj, True, (190, 190, 205)), (12, 28))
+        panel.blit(self.font_small.render(obj, True, (190, 190, 205)), (6, 15))
 
         # Checkpoints
         yy = 50
@@ -2482,33 +2522,111 @@ class Game:
         surface.blit(panel, (rect.x, rect.y))
 
     def draw_darkness(self, surface):
-        """Simulate blackout: dark screen + light around player."""
-        cid = self.chapter.id if self.chapter else ""
-        if cid in {"roof", "escape"}:
-            return
-        # If power restored, keep only a very subtle vignette
+        """Simulate blackout with cached surfaces for performance."""
         power_on = bool(self.mission and self.mission.data.get("power_restored", False))
-        base_alpha = 80 if power_on else 190
+        base_alpha = 90 if power_on else 220
+
         # Flicker when power is off
         if not power_on:
             t = pygame.time.get_ticks()
             if (t // 220) % 7 == 0:
-                base_alpha = 230
-            elif (t // 180) % 9 == 0:
-                base_alpha = 160
+                base_alpha = 245
+            elif (t // 180) % 11 == 0:
+                base_alpha = 190
 
+        psx, psy = self.camera.world_to_screen(self.player.x, self.player.y)
+
+        # --- Cache the static gradient mask (only rebuild when base_alpha changes) ---
+        # The gradient mask is player-relative, so we cache by (base_alpha).
+        # Each frame we blit the cached mask at the right offset.
+        cache_key = base_alpha
+        radius = 90 if power_on else 60
+        if getattr(self, "_dark_cache_key", None) != cache_key:
+            self._dark_cache_key = cache_key
+            # Build a small radial gradient surface centred at (0,0)
+            grad_r = int(radius * 1.75) + 4   # max radius we draw
+            grad_sz = grad_r * 2 + 1
+            grad = pygame.Surface((grad_sz, grad_sz), pygame.SRCALPHA)
+            grad.fill((0, 0, 0, base_alpha))
+            cx = cy = grad_r
+            n = 30
+            for i in range(n, -1, -1):
+                frac = i / n
+                a = int(base_alpha * frac)
+                r = max(1, int(radius * (0.15 + frac * 1.6)))
+                pygame.draw.circle(grad, (0, 0, 0, a), (cx, cy), r)
+            self._dark_grad = grad
+            self._dark_grad_r = grad_r
+
+        # --- Full-screen darkness base ---
         darkness = pygame.Surface((MAP_WIDTH, MAP_HEIGHT), pygame.SRCALPHA)
         darkness.fill((0, 0, 0, base_alpha))
 
-        # Light around player: "cut out" with gradient circles
-        psx, psy = self.camera.world_to_screen(self.player.x, self.player.y)
-        radius = 170 if power_on else 140
-        for i in range(8):
-            r = int(radius * (1 - i / 8))
-            a = int(180 * (i / 8))
-            pygame.draw.circle(darkness, (0, 0, 0, a), (int(psx), int(psy)), r)
+        # Stamp the pre-built gradient at the player position
+        gr = self._dark_grad_r
+        gx, gy = int(psx) - gr, int(psy) - gr
+        darkness.blit(self._dark_grad, (gx, gy), special_flags=pygame.BLEND_RGBA_MIN)
+
+        # --- Flashlight Cone (only when mouse is on game area) ---
+        mx, my = pygame.mouse.get_pos()
+        if mx < MAP_WIDTH:
+            flashlight_angle = math.atan2(my - psy, mx - psx)
+            cone_len = 400 if power_on else 320
+            cone_width = 0.62
+            num_layers = 20   # reduced from 35 for performance
+            cone_mask = pygame.Surface((MAP_WIDTH, MAP_HEIGHT), pygame.SRCALPHA)
+            cone_mask.fill((0, 0, 0, base_alpha))
+            for i in range(num_layers - 1, -1, -1):
+                frac = i / num_layers
+                target_alpha = int(base_alpha * frac)
+                c_width = cone_width * (0.4 + 0.6 * frac)
+                points = [(psx, psy)]
+                steps = 14   # reduced from 18
+                for j in range(steps + 1):
+                    a = flashlight_angle - c_width / 2 + (c_width * j / steps)
+                    l = cone_len * (0.9 + 0.1 * frac)
+                    points.append((psx + math.cos(a) * l, psy + math.sin(a) * l))
+                pygame.draw.polygon(cone_mask, (0, 0, 0, target_alpha), points)
+            darkness.blit(cone_mask, (0, 0), special_flags=pygame.BLEND_RGBA_MIN)
 
         surface.blit(darkness, (0, 0))
+        
+        # 3. Red Eyes for enemies in the dark (only when power is off)
+        if not power_on:
+            for entry in self.story_enemies:
+                if entry.enemy.is_dead: continue
+                # Enemy world position
+                ex_world, ey_world = entry.enemy.x, entry.enemy.y
+                ex, ey = self.camera.world_to_screen(ex_world, ey_world)
+                
+                # Boundary check
+                if not (-50 <= ex < MAP_WIDTH + 50 and -50 <= ey < MAP_HEIGHT + 50): continue
+                
+                # Check if in radial light
+                dist = math.hypot(ex_world - self.player.x, ey_world - self.player.y)
+                in_radial = dist < radius * 0.9 # Slightly smaller to ensure darkness
+                
+                # Check if in cone
+                in_cone = False
+                if mx < MAP_WIDTH:
+                    angle_to_enemy = math.atan2(ey_world - self.player.y, ex_world - self.player.x)
+                    diff = (angle_to_enemy - flashlight_angle + math.pi) % (2 * math.pi) - math.pi
+                    if abs(diff) < (cone_width * 0.6) and dist < cone_len:
+                        in_cone = True
+                
+                if not in_radial and not in_cone:
+                    # Draw red eyes (glow in the dark)
+                    eye_offset = 6
+                    eye_v_offset = 12
+                    eye_size = 2
+                    # Pulse effect
+                    pulse = abs(math.sin(pygame.time.get_ticks() * 0.006))
+                    alpha = int(160 + 95 * pulse)
+                    eye_color = (255, 20, 20, alpha)
+                    
+                    # Eyes usually at head height, assume ~10-15 pixels above center
+                    pygame.draw.circle(surface, eye_color, (int(ex - eye_offset), int(ey - eye_v_offset)), eye_size)
+                    pygame.draw.circle(surface, eye_color, (int(ex + eye_offset), int(ey - eye_v_offset)), eye_size)
 
     def render_world(self, surface):
         # Get visible tile range from camera
@@ -2869,6 +2987,7 @@ class Game:
                 yy += 16
 
     def draw_overlays(self):
+
         if pygame.time.get_ticks() < self.objective_flash_until and not self.dialog_npc and not self.next_chapter_ready:
             flash_rect = pygame.Rect(24, 22, 320, 54)
             self.draw_card(flash_rect, YELLOW)
@@ -2948,7 +3067,87 @@ class Game:
             screen.blit(txt, (sx - txt.get_width()//2, sy))
 
         self.draw_combo_ui(screen)
+        self.draw_screen_fx(screen)
 
+    # ------------------------------------------------------------------
+    def draw_screen_fx(self, surface):
+        """Full-screen overlay effects: low-HP vignette, Frenzy aura, gun recoil shake."""
+        now = pygame.time.get_ticks()
+        w, h = surface.get_width(), surface.get_height()
+
+        # 1. Screen Shake (recoil) ----------------------------------------
+        if now < self.screen_shake_until:
+            remaining = self.screen_shake_until - now
+            factor = remaining / max(1, self.screen_shake_intensity * 20)
+            amp = int(self.screen_shake_intensity * min(1.0, factor))
+            self.screen_shake_x = random.randint(-amp, amp)
+            self.screen_shake_y = random.randint(-amp, amp)
+        else:
+            self.screen_shake_x = 0
+            self.screen_shake_y = 0
+
+        if self.screen_shake_x or self.screen_shake_y:
+            # Shift a copy of the current screen by the shake offset
+            backup = surface.copy()
+            surface.fill((0, 0, 0))
+            surface.blit(backup, (self.screen_shake_x, self.screen_shake_y))
+
+        # 2. Low HP red vignette + heartbeat --------------------------------
+        hp_ratio = self.player.health / max(1, self.player.max_health)
+        if hp_ratio < 0.35:
+            pulse = abs(math.sin(now * 0.004))
+            danger_alpha = int(60 + pulse * 100 * (1.0 - hp_ratio / 0.35))
+
+            # Cache vignette surface — rebuild only when size changes (once)
+            vig_key = (w, h)
+            if getattr(self, "_vignette_surf", None) is None or getattr(self, "_vignette_key", None) != vig_key:
+                self._vignette_key = vig_key
+                edge = max(30, int(h * 0.22))
+                vig = pygame.Surface((w, h), pygame.SRCALPHA)
+                for i in range(edge):
+                    a = int(200 * (1.0 - i / edge) ** 2)   # normalised 0-200
+                    if a <= 0:
+                        continue
+                    pygame.draw.rect(vig, (220, 20, 20, a), (0, 0, w, i + 1))
+                    pygame.draw.rect(vig, (220, 20, 20, a), (0, h - i - 1, w, i + 1))
+                    pygame.draw.rect(vig, (220, 20, 20, a), (0, 0, i + 1, h))
+                    pygame.draw.rect(vig, (220, 20, 20, a), (w - i - 1, 0, i + 1, h))
+                self._vignette_surf = vig
+
+            # Scale alpha at runtime — cheap set_alpha, no re-draw
+            self._vignette_surf.set_alpha(danger_alpha)
+            surface.blit(self._vignette_surf, (0, 0))
+
+            # Heartbeat SFX
+            interval = int(400 + 400 * hp_ratio / 0.35)
+            if now - self.heartbeat_last > interval:
+                self.heartbeat_last = now
+                sound_manager.play("nhan_vat_trung_don")
+
+        # 3. Frenzy golden aura + motion-blur lines -------------------------
+        if getattr(self, "frenzy_active", False):
+            pulse = abs(math.sin(now * 0.006))
+            # Golden border glow
+            border_alpha = int(80 + pulse * 100)
+            aura = pygame.Surface((w, h), pygame.SRCALPHA)
+            border_w = 18
+            for i in range(border_w):
+                a = int(border_alpha * (1.0 - i / border_w) ** 1.5)
+                col = (255, 200, 0, a)
+                pygame.draw.rect(aura, col, (i, i, w - 2*i, h - 2*i), 1)
+            surface.blit(aura, (0, 0))
+
+            # Motion-blur streak lines
+            streak = pygame.Surface((w, h), pygame.SRCALPHA)
+            for _ in range(8):
+                sx = random.randint(0, w)
+                sy = random.randint(0, h)
+                length = random.randint(30, 120)
+                alpha = random.randint(15, 45)
+                pygame.draw.line(streak, (255, 220, 80, alpha), (sx, sy), (sx + length, sy + random.randint(-6, 6)), 2)
+            surface.blit(streak, (0, 0))
+
+    # ------------------------------------------------------------------
     def draw_combo_ui(self, surface):
         """Draw high-fidelity persistent Combo Meter on the left."""
         if self.combo_counter < 2:
@@ -3417,26 +3616,119 @@ class Game:
 
         # Buttons
         bx = panel.x + 60
-        by = panel.y + 120
+        by = panel.y + 100
         bw = panel.width - 120
-        bh = 74
-        gap = 22
+        bh = 64
+        gap = 14
         btn_continue = pygame.Rect(bx, by, bw, bh)
-        btn_menu = pygame.Rect(bx, by + (bh + gap), bw, bh)
-        btn_quit = pygame.Rect(bx, by + 2 * (bh + gap), bw, bh)
+        btn_settings = pygame.Rect(bx, by + (bh + gap), bw, bh)
+        btn_menu = pygame.Rect(bx, by + 2 * (bh + gap), bw, bh)
+        btn_quit = pygame.Rect(bx, by + 3 * (bh + gap), bw, bh)
+        
         draw_btn(btn_continue, "TIẾP TỤC", GREEN)
+        draw_btn(btn_settings, "CÀI ĐẶT", YELLOW)
         draw_btn(btn_menu, "VỀ MENU", CYAN)
         draw_btn(btn_quit, "THOÁT GAME", RED)
 
         hint = "ESC: tiếp tục | Click nút để chọn"
-        screen.blit(self.font_small.render(hint, True, SOFT), (panel.x + 60, panel.bottom - 54))
+        screen.blit(self.font_small.render(hint, True, SOFT), (panel.x + 60, panel.bottom - 44))
 
         # Store for click handling
         self.pause_buttons = {
             "continue": btn_continue,
+            "settings": btn_settings,
             "menu": btn_menu,
             "quit": btn_quit,
         }
+
+    def draw_settings(self):
+        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        overlay.fill((10, 8, 12, 230))
+        screen.blit(overlay, (0, 0))
+
+        # Panel settings
+        w, h = 600, 580
+        panel = pygame.Rect((SCREEN_WIDTH - w) // 2, (SCREEN_HEIGHT - h) // 2, w, h)
+        self.draw_card(panel, YELLOW, title="CÀI ĐẶT HỆ THỐNG", subtitle="Điều chỉnh âm lượng và độ nhạy")
+
+        # 1. Sliders (Volume SFX, Music, Sensitivity)
+        start_y = panel.y + 100
+        labels = [("Âm lượng SFX", self.vol_sfx), ("Âm lượng Nhạc", self.vol_music), ("Độ nhạy ngắm", self.sensitivity / 2.0)]
+        self.settings_buttons = {}
+        
+        for i, (label, val) in enumerate(labels):
+            yy = start_y + i * 80
+            screen.blit(self.font.render(label, True, WHITE), (panel.x + 60, yy))
+            
+            # Slider background
+            slider_rect = pygame.Rect(panel.x + 250, yy + 10, 280, 10)
+            pygame.draw.rect(screen, (40, 44, 52), slider_rect, border_radius=5)
+            
+            # Handle position
+            handle_x = slider_rect.x + int(val * slider_rect.width)
+            handle_rect = pygame.Rect(handle_x - 10, yy, 20, 30)
+            pygame.draw.rect(screen, YELLOW, handle_rect, border_radius=5)
+            
+            # Store slider for click
+            self.settings_buttons[f"slider_{i}"] = slider_rect
+            # Display percentage
+            screen.blit(self.font_small.render(f"{int(val*100)}%", True, SOFT), (slider_rect.right + 15, yy + 5))
+
+        # 2. Toggles (Aim Assist)
+        yy = start_y + 240
+        screen.blit(self.font.render("Hỗ trợ ngắm", True, WHITE), (panel.x + 60, yy))
+        toggle_rect = pygame.Rect(panel.x + 250, yy, 60, 30)
+        pygame.draw.rect(screen, GREEN if self.aim_assist else GRAY, toggle_rect, border_radius=15)
+        knob_x = toggle_rect.right - 25 if self.aim_assist else toggle_rect.x + 5
+        pygame.draw.circle(screen, WHITE, (knob_x + 10, yy + 15), 12)
+        self.settings_buttons["aim_assist"] = toggle_rect
+
+        # 3. Algorithm Selection (Checkboxes/Radio)
+        yy += 60
+        screen.blit(self.font.render("Thuật toán tìm đường", True, WHITE), (panel.x + 60, yy))
+        for i, mode in enumerate(self.hint_modes):
+            mx = panel.x + 60 + (i % 2) * 220
+            my = yy + 40 + (i // 2) * 45
+            box_rect = pygame.Rect(mx, my, 30, 30)
+            pygame.draw.rect(screen, (40, 44, 52), box_rect, border_radius=5)
+            if self.hint_mode_index == i:
+                pygame.draw.rect(screen, YELLOW, box_rect.inflate(-10, -10), border_radius=3)
+            screen.blit(self.font.render(mode, True, WHITE), (mx + 45, my + 2))
+            self.settings_buttons[f"algo_{i}"] = box_rect
+
+        # Back Button
+        btn_back = pygame.Rect(panel.centerx - 100, panel.bottom - 80, 200, 50)
+        pygame.draw.rect(screen, CARD_ALT, btn_back, border_radius=10)
+        pygame.draw.rect(screen, YELLOW, btn_back, 2, border_radius=10)
+        txt = self.font.render("QUAY LẠI", True, WHITE)
+        screen.blit(txt, txt.get_rect(center=btn_back.center))
+        self.settings_buttons["back"] = btn_back
+
+    def handle_settings_click(self, mx, my):
+        for key, rect in self.settings_buttons.items():
+            if rect.collidepoint(mx, my):
+                sound_manager.play("nut_bam")
+                if key.startswith("slider_"):
+                    # Calculate new value
+                    val = (mx - rect.x) / rect.width
+                    val = max(0.0, min(1.0, val))
+                    idx = int(key.split("_")[1])
+                    if idx == 0: 
+                        self.vol_sfx = val
+                        # Assuming SoundManager has this or similar
+                        if hasattr(sound_manager, "set_sfx_volume"):
+                            sound_manager.set_sfx_volume(val)
+                    elif idx == 1:
+                        self.vol_music = val
+                        sound_manager.set_music_volume(val)
+                    elif idx == 2:
+                        self.sensitivity = val * 2.0
+                elif key == "aim_assist":
+                    self.aim_assist = not self.aim_assist
+                elif key.startswith("algo_"):
+                    self.hint_mode_index = int(key.split("_")[1])
+                elif key == "back":
+                    self.show_settings = False
 
     def _fmt_time(self, ms):
         s = ms // 1000
@@ -3777,17 +4069,18 @@ class Game:
         overlay.fill((10, 8, 12, 220))
         screen.blit(overlay, (0, 0))
         
-        shop_rect = pygame.Rect(100, 50, SCREEN_WIDTH - 200, SCREEN_HEIGHT - 100)
+        # --- LEFT SIDE: SHOP ---
+        shop_rect = pygame.Rect(40, 50, SCREEN_WIDTH // 2 + 20, SCREEN_HEIGHT - 100)
         pygame.draw.rect(screen, PANEL, shop_rect, border_radius=20)
         pygame.draw.rect(screen, WHITE, shop_rect, 2, border_radius=20)
         
-        screen.blit(self.font_title.render("SURVIVOR SHOP", True, YELLOW), (shop_rect.x + 40, shop_rect.y + 20))
-        screen.blit(self.font_big.render(f"Money: {self.money}", True, YELLOW), (shop_rect.right - 260, shop_rect.y + 30))
+        screen.blit(self.font_title.render("SURVIVOR SHOP", True, YELLOW), (shop_rect.x + 30, shop_rect.y + 20))
+        screen.blit(self.font_big.render(f"Money: {self.money}", True, YELLOW), (shop_rect.right - 180, shop_rect.y + 30))
         
         # Categories Tabs
-        tab_x = shop_rect.x + 40
+        tab_x = shop_rect.x + 30
         tab_y = shop_rect.y + 90
-        tab_w = 150
+        tab_w = 140
         tab_h = 40
         for i, cat in enumerate(self.shop_categories):
             color = YELLOW if self.shop_category == cat else SOFT
@@ -3799,7 +4092,7 @@ class Game:
             screen.blit(txt, txt.get_rect(center=tab_rect.center))
 
         # OK Button (Next Level)
-        ok_rect = pygame.Rect(shop_rect.right - 180, shop_rect.bottom - 70, 140, 50)
+        ok_rect = pygame.Rect(shop_rect.right - 130, shop_rect.bottom - 70, 100, 50)
         pygame.draw.rect(screen, GREEN, ok_rect, border_radius=12)
         ok_txt = self.font_big.render("OK", True, WHITE)
         screen.blit(ok_txt, ok_txt.get_rect(center=ok_rect.center))
@@ -3810,15 +4103,14 @@ class Game:
         
         items = self.shop_content.get(self.shop_category, [])
         for i, (sid, title, desc) in enumerate(items):
-            r, c = i // 3, i % 3
-            cx = c * 320
+            r, c = i // 2, i % 2
+            cx = c * 310
             cy = r * 135
             card_rect = pygame.Rect(cx, cy, 290, 115)
             pygame.draw.rect(items_surf, CARD, card_rect, border_radius=16)
             pygame.draw.rect(items_surf, STROKE, card_rect, 1, border_radius=16)
             pygame.draw.rect(items_surf, YELLOW, (card_rect.x, card_rect.y, card_rect.width, 4), border_top_left_radius=16, border_top_right_radius=16)
             
-            # Icon / Image rendering
             tx = 14
             img = None
             if sid.startswith("buy_weapon_"):
@@ -3832,20 +4124,13 @@ class Game:
             elif sid.startswith("pet_"):
                 pet_id = sid.replace("pet_", "")
                 pet_cards = {
-                    "blue_bird": CARD_PET_BIRD,
-                    "fox": CARD_PET_FOX,
-                    "eagle": CARD_PET_EAGLE,
-                    "cat_gray": CARD_PET_GRAY_CAT,
-                    "cat_orange": CARD_PET_ORANGE_CAT,
-                    "racoon": CARD_PET_RACOON,
+                    "blue_bird": CARD_PET_BIRD, "fox": CARD_PET_FOX, "eagle": CARD_PET_EAGLE,
+                    "cat_gray": CARD_PET_GRAY_CAT, "cat_orange": CARD_PET_ORANGE_CAT, "racoon": CARD_PET_RACOON,
                 }
                 img = pet_cards.get(pet_id)
             else:
-                # Items (heal, armor, ammo)
                 img = ITEM_SURFACES.get(sid)
-                if img:
-                    # Scale item icons a bit larger for the shop if needed
-                    img = pygame.transform.scale(img, (48, 48))
+                if img: img = pygame.transform.scale(img, (48, 48))
 
             if img:
                 items_surf.blit(img, (cx + 12, cy + 25))
@@ -3855,23 +4140,67 @@ class Game:
             items_surf.blit(self.font_small.render(desc, True, SOFT), (cx + tx, cy + 56))
             items_surf.blit(self.font.render("Price: 1", True, YELLOW), (cx + tx, cy + 86))
 
-        # Blit clipped area
         screen.blit(items_surf, (scroll_rect.x, scroll_rect.y), (0, self.shop_scroll_y, scroll_rect.width, scroll_rect.height))
         
-        # Scroll indicator
-        if len(items) > 9:
+        if len(items) > 6:
             pygame.draw.rect(screen, SOFT, (shop_rect.right - 10, scroll_rect.y, 4, scroll_rect.height), border_radius=2)
             scroll_h = max(20, int(scroll_rect.height * (scroll_rect.height / 1200)))
             scroll_y = scroll_rect.y + int(self.shop_scroll_y * (scroll_rect.height / 1200))
             pygame.draw.rect(screen, YELLOW, (shop_rect.right - 10, min(scroll_rect.bottom - scroll_h, scroll_y), 4, scroll_h), border_radius=2)
 
+        # --- RIGHT SIDE: BACKPACK ---
+        bp_rect = pygame.Rect(shop_rect.right + 20, 50, SCREEN_WIDTH - shop_rect.right - 60, SCREEN_HEIGHT - 100)
+        pygame.draw.rect(screen, PANEL, bp_rect, border_radius=20)
+        pygame.draw.rect(screen, (0, 100, 100), bp_rect, 2, border_radius=20)
+        
+        screen.blit(self.font_title.render("BALO VŨ KHÍ", True, CYAN), (bp_rect.x + 30, bp_rect.y + 20))
+        
+        grid_y = bp_rect.y + 90
+        col_w = (bp_rect.width - 60) // 2
+        row_h = 130
+        
+        for i in range(6): # Max 6 weapons
+            r, c = i // 2, i % 2
+            slot_rect = pygame.Rect(bp_rect.x + 25 + c * (col_w + 10), grid_y + r * (row_h + 10), col_w, row_h)
+            
+            pygame.draw.rect(screen, (28, 32, 42), slot_rect, border_radius=10)
+            pygame.draw.rect(screen, (50, 60, 70), slot_rect, 1, border_radius=10)
+            
+            if i < len(self.weapon_manager.weapons):
+                w = self.weapon_manager.weapons[i]
+                if self.weapon_manager.current_weapon == w:
+                    pygame.draw.rect(screen, YELLOW, slot_rect, 2, border_radius=10)
+                
+                try:
+                    img = ALL_GRAPHICS_SURFACES.get(w.image_path)
+                    if not img: img = pygame.image.load(w.image_path).convert_alpha()
+                    if img:
+                        ratio = img.get_width() / img.get_height()
+                        target_h = 50
+                        target_w = int(target_h * ratio)
+                        if target_w > col_w - 20:
+                            target_w = col_w - 20
+                            target_h = int(target_w / ratio)
+                        img = pygame.transform.scale(img, (target_w, target_h))
+                        screen.blit(img, img.get_rect(center=(slot_rect.centerx, slot_rect.y + 40)))
+                except: pass
+                
+                is_melee = getattr(w, "melee", False)
+                ammo_str = f"Đạn: {w.ammo_in_mag}/{w.reserve_ammo}" if not is_melee else "Vô hạn"
+                screen.blit(self.font_small.render(ammo_str, True, WHITE), (slot_rect.x + 10, slot_rect.bottom - 30))
+                
+                # BÁN button
+                sell_btn = pygame.Rect(slot_rect.right - 55, slot_rect.bottom - 35, 45, 25)
+                pygame.draw.rect(screen, (200, 160, 40), sell_btn, border_radius=5)
+                screen.blit(self.font_small.render("BÁN", True, BLACK), (sell_btn.x + 8, sell_btn.y + 2))
+
     def handle_shop_click(self, mx, my):
-        shop_rect = pygame.Rect(100, 50, SCREEN_WIDTH - 200, SCREEN_HEIGHT - 100)
+        shop_rect = pygame.Rect(40, 50, SCREEN_WIDTH // 2 + 20, SCREEN_HEIGHT - 100)
         
         # Tabs clicks
-        tab_x = shop_rect.x + 40
+        tab_x = shop_rect.x + 30
         tab_y = shop_rect.y + 90
-        tab_w = 150
+        tab_w = 140
         tab_h = 40
         for i, cat in enumerate(self.shop_categories):
             tab_rect = pygame.Rect(tab_x + i * (tab_w + 10), tab_y, tab_w, tab_h)
@@ -3881,7 +4210,7 @@ class Game:
                 return
 
         # OK Button click
-        ok_rect = pygame.Rect(shop_rect.right - 180, shop_rect.bottom - 70, 140, 50)
+        ok_rect = pygame.Rect(shop_rect.right - 130, shop_rect.bottom - 70, 100, 50)
         if ok_rect.collidepoint(mx, my):
             if self.pending_transition:
                 self.set_chapter(self.chapter_index + 1)
@@ -3890,6 +4219,35 @@ class Game:
             self.autoplay = False
             self.show_shop = False
             return
+
+        # Backpack interactions (sell/select)
+        bp_rect = pygame.Rect(shop_rect.right + 20, 50, SCREEN_WIDTH - shop_rect.right - 60, SCREEN_HEIGHT - 100)
+        if bp_rect.collidepoint(mx, my):
+            grid_y = bp_rect.y + 90
+            col_w = (bp_rect.width - 60) // 2
+            row_h = 130
+            for i in range(len(self.weapon_manager.weapons)):
+                r, c = i // 2, i % 2
+                slot_rect = pygame.Rect(bp_rect.x + 25 + c * (col_w + 10), grid_y + r * (row_h + 10), col_w, row_h)
+                sell_btn = pygame.Rect(slot_rect.right - 55, slot_rect.bottom - 35, 45, 25)
+                if sell_btn.collidepoint(mx, my):
+                    w = self.weapon_manager.weapons[i]
+                    if len(self.weapon_manager.weapons) > 1:
+                        self.weapon_manager.weapons.remove(w)
+                        if self.weapon_manager.current_weapon == w:
+                            self.weapon_manager.current_weapon = self.weapon_manager.weapons[0]
+                        self.money += 1
+                        self.popup = f"Đã bán: {w.name} (+1$)"
+                        self.popup_timer = pygame.time.get_ticks() + 1500
+                        sound_manager.play("nhat_do")
+                    else:
+                        self.popup = "Không thể bán vũ khí cuối cùng!"
+                        self.popup_timer = pygame.time.get_ticks() + 1500
+                    return
+                if slot_rect.collidepoint(mx, my):
+                    self.weapon_manager.current_weapon = self.weapon_manager.weapons[i]
+                    sound_manager.play("nut_bam")
+                    return
 
         # Item clicks (with scroll offset)
         scroll_rect = pygame.Rect(shop_rect.x + 20, shop_rect.y + 140, shop_rect.width - 40, shop_rect.height - 230)
@@ -3902,8 +4260,8 @@ class Game:
 
         items = self.shop_content.get(self.shop_category, [])
         for i, (sid, title, desc) in enumerate(items):
-            r, c = i // 3, i % 3
-            cx = c * 320
+            r, c = i // 2, i % 2
+            cx = c * 310
             cy = r * 135
             card_rect = pygame.Rect(cx, cy, 290, 115)
             
@@ -4157,7 +4515,7 @@ class Game:
         elif self.state == "intro":
             self.draw_intro()
         elif self.state in ["playing", "pause"]:
-            self.render_world(screen)
+            self.draw_world()
             self.draw_sidebar()
             self.draw_overlays()
             self.draw_mission_panel() # Added transparent mission panel
@@ -4179,6 +4537,8 @@ class Game:
         else:
             pygame.mouse.set_visible(True)
             
+        if getattr(self, "show_settings", False):
+            self.draw_settings()
         pygame.display.flip()
 
     def draw_mission_panel(self):
@@ -4231,6 +4591,15 @@ class Game:
         if event.type == pygame.QUIT:
             pygame.quit()
             sys.exit()
+
+        # Settings Handling (Blocking other inputs)
+        if getattr(self, "show_settings", False):
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                mx, my = pygame.mouse.get_pos()
+                self.handle_settings_click(mx, my)
+            elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                self.show_settings = False
+            return
         
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_ESCAPE:
@@ -4416,6 +4785,9 @@ class Game:
                 if btns.get("continue") and btns["continue"].collidepoint(mx, my):
                     sound_manager.play("nut_bam")
                     self.state = "playing"
+                elif btns.get("settings") and btns["settings"].collidepoint(mx, my):
+                    sound_manager.play("nut_bam")
+                    self.show_settings = True
                 elif btns.get("menu") and btns["menu"].collidepoint(mx, my):
                     sound_manager.play("nut_bam")
                     self.state = "menu"
@@ -4431,6 +4803,20 @@ class Game:
 
         if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
             self.mouse_down = False
+
+    def _find_nearest_enemy_method(self, radius=300):
+        px, py = self.player.x, self.player.y
+        nearest = None
+        min_dist = radius
+
+        for e in self.story_enemies:
+            ex, ey = e.pos
+            dist = math.hypot(ex - px, ey - py)
+            if dist < min_dist:
+                min_dist = dist
+                nearest = e
+
+        return nearest
 
 
 def main():

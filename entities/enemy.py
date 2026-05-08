@@ -1210,7 +1210,7 @@ class EvilWizard(Enemy):
     """Pháp sư hắc ám: Hiện đã chuyển sang cận chiến bằng gậy ma thuật."""
     def __init__(self, x, y):
         # Melee stats: high damage, close range
-        super().__init__(x, y, speed=1.8, health=250, damage=25, acceptance_radius=90, scale=1.0)
+        super().__init__(x, y, speed=1.8, health=250, damage=25, acceptance_radius=90, scale=0.65)
         self.lose_aggro_range = 800
         
         self.frames = {
@@ -1237,7 +1237,7 @@ class EvilWizard(Enemy):
         # Determine animation action (don't override if already attacking)
         if self.current_action not in ['attack', 'attack2', 'takehit', 'death']:
             # Attack check first
-            if distance < 110 and self.attack_cooldown <= 0:
+            if distance < 85 and self.attack_cooldown <= 0:
                 self.current_action = random.choice(['attack', 'attack2'])
                 self.current_frame = 0
                 self.attack_cooldown = 50 # Slightly faster cooldown
@@ -1262,7 +1262,7 @@ class EvilWizard(Enemy):
 
         # Apply damage mid-animation (frame 4 or 5 is usually the strike)
         if self.current_action in ['attack', 'attack2'] and self.current_frame == 4:
-            if distance < 120: # Wider hit range for large boss sprite
+            if distance < 95: # Reduced hit range
                 player.health -= self.damage
                 # Trigger visual slash
                 self.show_slash = True
@@ -1351,7 +1351,7 @@ class OldGuardian(Enemy):
 class NightTerror(Enemy):
     """Hidden Boss using Boss1-SpritSheet. Accurately sliced for 140x124 frames."""
     def __init__(self, x, y):
-        super().__init__(x, y, speed=1.5, health=2000, damage=40, acceptance_radius=150, scale=2.5)
+        super().__init__(x, y, speed=1.5, health=2000, damage=40, acceptance_radius=150, scale=1.4)
         # Boss1-SpritSheet.png (1120x744) -> 8x8 grid of 140x93
         self.frames = {
             'idle': self.load_frame_sheet("Sprites/Sprites_Enemy/Boss1-SpritSheet.png", 140, 93, 1, 8),
@@ -1360,7 +1360,7 @@ class NightTerror(Enemy):
             'death': self.load_frame_sheet("Sprites/Sprites_Enemy/Boss1-SpritSheet.png", 140, 93, 4, 8)[24:32],
             'takehit': self.load_frame_sheet("Sprites/Sprites_Enemy/Boss1-SpritSheet.png", 140, 93, 5, 8)[32:40]
         }
-        self.ranged_attack_range = 300
+        self.ranged_attack_range = 180
         
     def update_behavior(self, player):
         dist = self.distance_to(player)
@@ -1379,10 +1379,10 @@ class ShadowWraith(Enemy):
         super().__init__(x, y, speed=2.2, health=120, damage=15, acceptance_radius=40, scale=1.0)
         # All Characters.png (630x500) -> 5x5 grid of 126x100
         self.frames = {
-            'idle': self.load_frame_sheet("Sprites/Sprites_Enemy/All Characters.png", 126, 100, 1, 5),
-            'run': self.load_frame_sheet("Sprites/Sprites_Enemy/All Characters.png", 126, 100, 2, 5)[5:10],
-            'attack': self.load_frame_sheet("Sprites/Sprites_Enemy/All Characters.png", 126, 100, 3, 5)[10:15],
-            'death': self.load_frame_sheet("Sprites/Sprites_Enemy/All Characters.png", 126, 100, 4, 5)[15:20]
+            'idle': self.load_frame_sheet("Sprites/Sprites_Enemy/Evil Wizard/Idle.png", 250, 250, 1, 8),
+            'run': self.load_frame_sheet("Sprites/Sprites_Enemy/Evil Wizard/Run.png", 250, 250, 1, 8),
+            'attack': self.load_frame_sheet("Sprites/Sprites_Enemy/Evil Wizard/Attack1.png", 250, 250, 1, 8),
+            'death': self.load_frame_sheet("Sprites/Sprites_Enemy/Evil Wizard/Death.png", 250, 250, 1, 7)
         }
         self.alpha = 150 # Semi-transparent
         
