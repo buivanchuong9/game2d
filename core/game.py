@@ -554,7 +554,7 @@ class Game:
         self.set_map_background_by_index(0)
         self.exit_path = []
         self.exit_path_timer = 0
-        self.hint_modes = ["BFS", "DFS", "SAFE", "A*"]
+        self.hint_modes = ["BFS", "DFS", "HEURISTIC", "A*"]
         self.hint_mode_index = 0
         
         self.popup = ""
@@ -654,7 +654,7 @@ class Game:
         self.sensitivity = 1.0
         self.aim_assist = True
         self.settings_buttons = {}
-        # Các thuật toán hiện có (self.hint_modes đã có: ["BFS", "DFS", "SAFE", "A*"])
+        # Các thuật toán hiện có (self.hint_modes đã có: ["BFS", "DFS", "HEURISTIC", "A*"])
 
     def discover_map_backgrounds(self):
         map_dir = os.path.join(BASE_DIR, "Sprites", "Sprites_Environment", "maps")
@@ -2573,21 +2573,28 @@ class Game:
             flashlight_angle = math.atan2(my - psy, mx - psx)
             cone_len = 400 if power_on else 320
             cone_width = 0.62
-            num_layers = 20   # reduced from 35 for performance
-            cone_mask = pygame.Surface((MAP_WIDTH, MAP_HEIGHT), pygame.SRCALPHA)
+            num_layers = 7   # reduced for performance
+            
+            # Use a localized surface instead of full screen
+            mask_size = int(cone_len * 2)
+            cone_mask = pygame.Surface((mask_size, mask_size), pygame.SRCALPHA)
             cone_mask.fill((0, 0, 0, base_alpha))
+            cx, cy = cone_len, cone_len
+            
             for i in range(num_layers - 1, -1, -1):
                 frac = i / num_layers
                 target_alpha = int(base_alpha * frac)
                 c_width = cone_width * (0.4 + 0.6 * frac)
-                points = [(psx, psy)]
-                steps = 14   # reduced from 18
+                points = [(cx, cy)]
+                steps = 8   # reduced for performance
                 for j in range(steps + 1):
                     a = flashlight_angle - c_width / 2 + (c_width * j / steps)
                     l = cone_len * (0.9 + 0.1 * frac)
-                    points.append((psx + math.cos(a) * l, psy + math.sin(a) * l))
+                    points.append((cx + math.cos(a) * l, cy + math.sin(a) * l))
                 pygame.draw.polygon(cone_mask, (0, 0, 0, target_alpha), points)
-            darkness.blit(cone_mask, (0, 0), special_flags=pygame.BLEND_RGBA_MIN)
+            
+            gx, gy = int(psx) - cone_len, int(psy) - cone_len
+            darkness.blit(cone_mask, (gx, gy), special_flags=pygame.BLEND_RGBA_MIN)
 
         surface.blit(darkness, (0, 0))
         
