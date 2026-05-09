@@ -1,75 +1,118 @@
-content = """# 🧪 SwarmShot - Game Sinh Tồn Bắn Zombie Góc Nhìn Từ Trên Xuống 🧟‍♂️
+# 🧟‍♂️ SwarmShot — Zombie Survival Game (Top-Down Shooter)
 
-Chào mừng đến với SwarmShot, một dự án cực kỳ thân thiện cho người mới bắt đầu để dấn thân vào con đường lập trình game với Python (sử dụng thư viện Pygame)!
+<div align="center">
 
-Dự án được phát triển và tối ưu bởi: Bùi Văn Chương & Đào Văn Dương.
+# 👨‍💻 Bùi Văn Chương & 👨‍💻 Đào Văn Dương
 
-## 📖 Cốt Truyện: Thế Giới Trong Đống Đổ Nát
+![Python](https://img.shields.io/badge/Python-3.12-blue?style=for-the-badge&logo=python)
+![Pygame](https://img.shields.io/badge/Pygame-2.x-green?style=for-the-badge)
+![Status](https://img.shields.io/badge/Status-Development-orange?style=for-the-badge)
+![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20MacOS%20%7C%20Linux-black?style=for-the-badge)
 
-Năm 2084. Sự tò mò vô độ của nhân loại đã dẫn đến sự ra đời của Dự án Genesis, một thí nghiệm di truyền với tham vọng xóa sổ mọi loại bệnh tật. Các nhà khoa học đã chế tạo ra một loại virus có khả năng viết lại DNA để phục hồi mọi tổn thương tế bào. Thế nhưng, thảm họa đã ập đến. Virus đột biến mất kiểm soát, biến phần lớn nhân loại thành những sinh vật zombie khát máu.
+<img src="https://media.tenor.com/8mHSE6GJQ6kAAAAC/zombie.gif" width="500"/>
 
-Giữa cơn đại hồng thủy, một vài loài động vật bỗng phát triển khả năng miễn dịch tự nhiên. Bạn sẽ vào vai Tiến sĩ Arin Locke, một kỹ sư robot kiêm chuyên gia sinh tồn. Trang bị trí tuệ sắc bén, công nghệ tối tân cùng bộ giáp chiến đấu thử nghiệm, bạn bước vào chặng đường giải cứu những sinh vật miễn dịch và giải mã phương thuốc chữa trị. Cầm vũ khí lên, bạn phải bảo vệ, sinh tồn và tái thiết lại nền văn minh nhân loại.
+### 🔥 A Fast-Paced Zombie Survival Game Built With Python & Pygame
 
-## 🎮 Tổng Quan Gameplay
-
-### Phiên Bản Hiện Tại (Cơ Bản):
-- Chạy file main.py bằng VS Code.
-- Bản đồ: 44x44 ô (tiles), mỗi ô 16x16 pixels.
-- Cơ chế hiện có: Người chơi di chuyển, hiệu ứng animation mượt mà bằng spritesheet.
-
-### Phiên Bản Hoàn Chỉnh:
-- Chạy file example.py (trong thư mục Example_of_Game).
-- Tính năng: Hệ thống thú cưng, vũ khí, cửa hàng (Shop), tháp phòng thủ, 20 wave zombie căng thẳng.
-
-## 🗂️ Cấu Trúc Thư Mục
-
-SwarmShot/
-├── main.py            # Vòng lặp game chính, giao diện, wave system
-├── player.py          # Class Người chơi (di chuyển, máu, vũ khí)
-├── enemy.py           # Class Kẻ địch
-├── pet.py             # Class Thú cưng
-├── weapon.py          # Class Vũ khí và đạn
-├── building.py        # Class Công trình phòng thủ
-├── shop.py            # Logic hệ thống Cửa hàng
-├── 📁Example_of_Game/  # Demo phiên bản hoàn chỉnh
-├── 📁Sounds/           # Nhạc và âm thanh
-├── 📁Sprites/          # Hình ảnh nhân vật, quái, môi trường
-└── README.md          # Tài liệu hướng dẫn
-
-## 🚀 Hướng Dẫn Cài Đặt
-
-1. Cài đặt Python (3.12.4): Tải từ python.org và nhớ tick "Add Python to PATH".
-2. Cài đặt Pygame: Mở terminal và gõ:
-   pip install pygame
-
-## ⚡ Chạy Game
-
-1. Chạy bản cơ bản:
-   python main.py
-
-2. Chạy bản Demo nâng cao:
-   cd Example_of_Game
-   python example.py
-
-## 👨‍💻 Hướng Dẫn Đóng Góp (Contribution)
-
-1. Fork Repository từ: https://github.com/opencodeiiita/SwarmShot
-2. Clone về máy: git clone <link_fork_cua_ban>
-3. Tạo nhánh mới, thực hiện thay đổi và test kỹ bằng lệnh python main.py.
-4. Commit và Push code lên GitHub cá nhân.
-5. Tạo Pull Request (PR) để chờ duyệt code.
-
-## 💻 Kênh Giao Tiếp
-Tham gia Discord để thảo luận cùng Mentor: https://discord.gg/SxBATvUPnC
-
-## 🤝 Đội Ngũ Mentor
-1. Saurav Gitte (SauravGitte)
-2. Bhavya Gupta (Gamin8ing)
-3. Srijan Suryansh (Lordlyamigo)
+</div>
 
 ---
-Chúc chương đz code vui vẻ và sớm giải cứu thế giới thành công! 🌍👨‍🔬
-"""
 
-with open("README_SwarmShot_VN.txt", "w", encoding="utf-8") as f:
-    f.write(content)
+# 📚 Table of Contents
+
+- [🧠 About The Game](#-about-the-game)
+- [📖 Story Mode](#-story-mode)
+- [🎮 Gameplay Features](#-gameplay-features)
+- [🗂️ Project Structure](#️-project-structure)
+- [🛠️ Technologies Used](#️-technologies-used)
+- [🚀 Installation Guide](#-installation-guide)
+- [▶️ Run The Game](#️-run-the-game)
+- [🧩 Future Improvements](#-future-improvements)
+- [🤝 Contribution Guide](#-contribution-guide)
+- [👨‍💻 Development Team](#-development-team)
+- [📷 Preview](#-preview)
+- [📞 Contact & Community](#-contact--community)
+
+---
+
+# 🧠 About The Game
+
+**SwarmShot** là dự án game sinh tồn bắn zombie góc nhìn từ trên xuống (Top-Down Shooter), được xây dựng bằng **Python + Pygame** dành cho:
+
+✅ Người mới học lập trình game  
+✅ Sinh viên muốn học OOP qua game  
+✅ Người muốn hiểu Game Loop, Animation, Collision, Wave System  
+✅ Người thích zombie survival game  
+
+Game tập trung vào:
+
+- Hệ thống di chuyển mượt
+- Animation bằng Sprite Sheet
+- Zombie AI cơ bản
+- Weapon System
+- Pet System
+- Wave Survival
+- Shop & Defense Mechanics
+
+---
+
+# 📖 Story Mode
+
+## 🌍 The Year 2084...
+
+Nhân loại tạo ra một dự án sinh học mang tên **Genesis Project** nhằm chữa trị mọi loại bệnh bằng công nghệ tái tạo DNA.
+
+Nhưng mọi thứ vượt khỏi tầm kiểm soát...
+
+Một biến thể virus mới xuất hiện và lây lan toàn cầu với tốc độ kinh hoàng, biến con người thành những sinh vật zombie khát máu.
+
+Giữa thế giới đổ nát, một số loài động vật phát triển khả năng miễn dịch kỳ lạ.
+
+Bạn vào vai:
+
+# 👨‍🔬 Dr. Arin Locke
+
+Một kỹ sư robot và chuyên gia sinh tồn.
+
+Trang bị:
+- Bộ giáp công nghệ cao
+- Kho vũ khí quân sự
+- Drone hỗ trợ chiến đấu
+- AI thú cưng hỗ trợ sinh tồn
+
+Mục tiêu của bạn:
+- Sống sót qua các đợt zombie
+- Giải cứu sinh vật miễn dịch
+- Khám phá bí mật của Genesis
+- Tái thiết nền văn minh nhân loại
+
+---
+
+# 🎮 Gameplay Features
+
+## ✅ Current Version
+
+### 🔹 Basic Gameplay
+- Character Movement
+- Smooth Animation
+- Tile-based Map
+- Camera Movement
+- Sprite Rendering
+
+### 🔹 Game Map
+- 44x44 Tiles
+- 16x16 Pixel Tile System
+
+### 🔹 Systems
+- Collision Detection
+- Basic Enemy AI
+- HP System
+- Wave Spawning
+
+---
+
+## 🚀 Advanced Demo Version
+
+📂 Located in:
+
+```bash
+Example_of_Game/
