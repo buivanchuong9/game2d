@@ -554,8 +554,18 @@ class Game:
         self.set_map_background_by_index(0)
         self.exit_path = []
         self.exit_path_timer = 0
-        self.hint_modes = ["BFS", "DFS", "HEURISTIC", "A*"]
+        # BFS/DFS: thuật toán gợi ý đường đi cho người chơi (cài đặt)
+        # A*: quái vật dùng để đuổi người chơi (entities/enemy.py)
+        # Heuristic (Greedy): game tự dùng để tìm vật phẩm gần nhất (súng, đạn)
+        self.hint_modes = ["BFS", "DFS"]
         self.hint_mode_index = 0
+        # DFS scan: quét toàn bộ map để thống kê vật phẩm
+        self.dfs_scan_result = {}    # {"weapon": N, "ammo": N, "heal": N, ...}
+        self.dfs_scan_timer = 0      # Đếm frame để chạy lại DFS scan
+        self.dfs_scan_visited = set()  # Sử dụng DFS để track visited tiles
+        # Heuristic path: đường cam tới vật phẩm rơi gần nhất
+        self.heuristic_item_path = []
+        self.heuristic_item_timer = 0
         
         self.popup = ""
         self.popup_timer = 0
@@ -654,7 +664,10 @@ class Game:
         self.sensitivity = 1.0
         self.aim_assist = True
         self.settings_buttons = {}
-        # Các thuật toán hiện có (self.hint_modes đã có: ["BFS", "DFS", "HEURISTIC", "A*"])
+        # Thuật toán:
+        #   BFS/DFS -> người chơi chọn trong Settings (gợi ý đường)
+        #   A*      -> quái dùng để đuổi người chơi (entities/enemy.py)
+        #   Heuristic (Greedy Best-First) -> tự động tìm vật phẩm gần nhất
 
     def discover_map_backgrounds(self):
         map_dir = os.path.join(BASE_DIR, "Sprites", "Sprites_Environment", "maps")
@@ -1894,11 +1907,21 @@ class Game:
                 damage_mult=getattr(self.player, "damage_mult", 1.0)
             )
 
-            # Update exit path every 60 frames (1s) to save performance
+            # Update exit path every 60 frames (1s) - BFS tìm đường làm nhiệm vụ / cổng
             self.exit_path_timer -= 1
             if self.exit_path_timer <= 0:
                 self.update_exit_path()
                 self.exit_path_timer = 60
+            # DFS scan map để thống kê vật phẩm every 90 frames (~1.5s)
+            self.dfs_scan_timer -= 1
+            if self.dfs_scan_timer <= 0:
+                self.dfs_scan_map()
+                self.dfs_scan_timer = 90
+            # Heuristic path đến item rơi gần nhất every 45 frames
+            self.heuristic_item_timer -= 1
+            if self.heuristic_item_timer <= 0:
+                self.update_heuristic_item_path()
+                self.heuristic_item_timer = 45
             
             self.skill_manager.update([entry.enemy for entry in self.story_enemies], self.current_blocked)
             self.update_particles()
@@ -2414,8 +2437,131 @@ class Game:
             return "Kích hoạt beacon"
         return "Ra điểm trực thăng"
 
+    def dfs_scan_map(self):
+        """Dùng DFS quét toàn bộ bản đồ từ vị trí người chơi để đếm vật phẩm.
+        Thuật toán DFS duyệt theo chiều sâu (stack-based), quét qua các vùng bản đồ.
+        Kết quả được hiển thị ở panel dưới cùng màn hình.
+        """
+        if not self.chapter or not self.mission:
+            return
+        start = self.current_tile()
+        if not start:
+            return
+        blocked = self.current_blocked
+        # DFS flood-fill từ vị trí người chơi (sử dụng list như stack)
+        visited = set()
+        stack = [start]
+        visited.add(start)
+        # Tạo bản đồ tile -> item để tra cứu nhanh
+        item_map = {}
+        for item in self.chapter.items:
+            if not item.collected:
+                item_map[item.grid_pos] = item
+        # DFS counts
+        counts = {"weapon": 0, "ammo": 0, "heal": 0, "armor": 0,
+                  "weapon_drop": 0, "mission": 0}
+        found_items = []  # list of (tile, item_type, name)
+        visited_count = 0
+        max_tiles = GRID_SIZE * GRID_SIZE  # tối đa
+        while stack and visited_count < max_tiles:
+            tile = stack.pop() # Lấy phần tử cuối cùng (LIFO) -> DFS
+            visited_count += 1
+            # Kiểm tra có item ở tile này không
+            if tile in item_map:
+                it = item_map[tile]
+                mission_types = {"keycard", "power", "code", "antidote",
+                                 "exit_key", "gate", "signal", "map", "flashlight"}
+                if it.item_type in mission_types:
+                    counts["mission"] += 1
+                elif it.item_type in ("weapon", "rocket_weapon"):
+                    counts["weapon"] += 1
+                elif it.item_type == "weapon_drop":
+                    counts["weapon_drop"] += 1
+                elif it.item_type == "ammo":
+                    counts["ammo"] += 1
+                elif it.item_type == "heal":
+                    counts["heal"] += 1
+                elif it.item_type == "armor":
+                    counts["armor"] += 1
+                found_items.append((tile, it.item_type, it.name))
+            # Mở rộng DFS sang 4 hướng
+            x, y = tile
+            for nx, ny in ((x+1,y),(x-1,y),(x,y+1),(x,y-1)):
+                if 0 <= nx < GRID_SIZE and 0 <= ny < GRID_SIZE:
+                    if (nx, ny) not in blocked and (nx, ny) not in visited:
+                        visited.add((nx, ny))
+                        stack.append((nx, ny))
+        self.dfs_scan_result = counts
+        self.dfs_scan_visited = visited
+        self.dfs_scan_found_items = found_items
+
+    def update_heuristic_item_path(self):
+        """Dùng Heuristic (Greedy Best-First) tìm vật phẩm rơi gần nhất và vẽ đường cam.
+        Chỉ dùng Manhattan h(n), không có g(n) -> tìm nhanh, không đảm bảo ngắn nhất.
+        """
+        from systems.pathfinding import heuristic_search
+        if not self.chapter or not self.mission:
+            self.heuristic_item_path = []
+            return
+        start = self.current_tile()
+        if not start:
+            self.heuristic_item_path = []
+            return
+        blocked = self.current_blocked
+        # Tìm item rơi / pickup gần nhất (không tính mission item)
+        pickup_types = {"weapon", "ammo", "heal", "armor", "weapon_drop", "rocket_weapon"}
+        best_tile = None
+        best_dist = float('inf')
+        for item in self.chapter.items:
+            if item.collected:
+                continue
+            if item.item_type not in pickup_types:
+                continue
+            itile = item.grid_pos
+            d = abs(itile[0] - start[0]) + abs(itile[1] - start[1])
+            if d < best_dist:
+                best_dist = d
+                best_tile = itile
+        if best_tile:
+            self.heuristic_item_path = heuristic_search(
+                start, best_tile, GRID_SIZE, GRID_SIZE, blocked)
+        else:
+            self.heuristic_item_path = []
+
+    def nearest_item_tile_heuristic(self, item_types=("weapon", "ammo", "heal")):
+        """Dùng Heuristic (Greedy Best-First) để tìm vật phẩm gần nhất.
+        Thuật toán Greedy chỉ dùng h(n) = Manhattan distance, không tính g(n),
+        nên tìm nhanh nhưng không đảm bảo đường đi ngắn nhất (khác A* và BFS).
+        """
+        from systems.pathfinding import heuristic_search
+        start = self.current_tile()
+        if not start:
+            return None
+        blocked = self.current_blocked
+        best_item = None
+        best_dist = float('inf')
+        for item in self.chapter.items:
+            if item.collected:
+                continue
+            if item.item_type not in item_types:
+                continue
+            itile = item.grid_pos
+            dist = abs(itile[0] - start[0]) + abs(itile[1] - start[1])  # Manhattan
+            if dist < best_dist:
+                best_dist = dist
+                best_item = itile
+        if best_item:
+            path = heuristic_search(start, best_item, GRID_SIZE, GRID_SIZE, blocked)
+            return path
+        return None
+
     def update_exit_path(self):
-        """Update the BFS path to the current objective or exit portal."""
+        """Cập nhật đường gợi ý cho người chơi.
+        - BFS: tìm đường ngắn nhất đảm bảo (Level-order traversal).
+        - DFS: tìm đường nhanh nhưng không tối ưu (Stack-based).
+        - Quái dùng A* (trong entities/enemy.py).
+        - Khi objective là nhặt súng/đạn, dùng Heuristic để gợi ý.
+        """
         current_objective = self.objective_label()
         if current_objective != self.last_objective_text:
             self.last_objective_text = current_objective
@@ -2427,35 +2573,135 @@ class Game:
         
         if start and goal:
             mode = self.hint_modes[self.hint_mode_index]
+            # Nếu objective là nhặt vũ khí hoặc đạn → dùng Heuristic (Greedy)
+            obj_lbl = self.objective_label().lower()
+            is_pickup_objective = any(k in obj_lbl for k in ["nhặt", "pick", "vũ khí", "đạn", "ammo", "weapon"])
+            if is_pickup_objective:
+                # Thử tìm item gần nhất qua Greedy Heuristic
+                heur_path = self.nearest_item_tile_heuristic(("weapon", "ammo", "heal", "weapon_drop"))
+                if heur_path:
+                    self.exit_path = heur_path
+                    return
             if mode == "DFS":
                 from systems.pathfinding import dfs
                 self.exit_path = dfs(start, goal, GRID_SIZE, GRID_SIZE, blocked)
-            else:
+            else:  # BFS (default)
                 self.exit_path = bfs(start, goal, GRID_SIZE, GRID_SIZE, blocked)
 
     def draw_path_overlay(self, surface):
-        """Draw the BFS path for the player."""
-        if not self.exit_path or len(self.exit_path) < 2: 
+        """Vẽ đường BFS chỉ hướng người chơi tới mục tiêu (CYAN)."""
+        if not self.exit_path or len(self.exit_path) < 2:
             return
-            
-        # Bright Cyan/Green that glows in the dark
-        # Purple for the final escape chapter
+        # Purple cho chương escape, còn lại Cyan
         if self.chapter and self.chapter.id == "escape":
-            color = (180, 0, 255) 
+            color = (180, 0, 255)
         else:
-            color = (0, 255, 255) 
+            color = (0, 220, 255)
+        glow_color = (color[0] // 3, color[1] // 3, color[2] // 3)
         points = []
         for x, y in self.exit_path:
             sx, sy = self.camera.world_to_screen(x * TILE_SIZE + 8, y * TILE_SIZE + 8)
             points.append((sx, sy))
-            
         if len(points) > 1:
-            # Draw a thicker glowing line
-            pygame.draw.lines(surface, color, False, points, 4)
-            # Draw start and end markers
+            # Glow effect: vẽ đường rộng hơn màu tối phíd dưới
+            pygame.draw.lines(surface, glow_color, False, points, 8)
+            pygame.draw.lines(surface, color, False, points, 3)
+            # Node dots
+            for i, p in enumerate(points):
+                if i % 5 == 0:
+                    pygame.draw.circle(surface, color, p, 3)
+            # Label đầu đường
+            if points:
+                mode_label = self.hint_modes[self.hint_mode_index]
+                label = self.font_small.render(mode_label, True, color)
+                surface.blit(label, (points[-1][0] + 6, points[-1][1] - 10))
+
+    def draw_heuristic_item_path(self, surface):
+        """Vẽ đường Heuristic (Greedy) tới vật phẩm rơi gần nhất (ORANGE)."""
+        path = self.heuristic_item_path
+        if not path or len(path) < 2:
+            return
+        color = (255, 165, 0)   # Orange
+        glow = (80, 40, 0)
+        points = []
+        for x, y in path:
+            sx, sy = self.camera.world_to_screen(x * TILE_SIZE + 8, y * TILE_SIZE + 8)
+            points.append((sx, sy))
+        if len(points) > 1:
+            pygame.draw.lines(surface, glow, False, points, 7)
+            pygame.draw.lines(surface, color, False, points, 3)
             for i, p in enumerate(points):
                 if i % 4 == 0:
                     pygame.draw.circle(surface, color, p, 3)
+            # Label cuối đường
+            if points:
+                label = self.font_small.render("Item", True, color)
+                surface.blit(label, (points[-1][0] + 6, points[-1][1] - 10))
+
+    def draw_dfs_scan_panel(self, surface):
+        """Vẽ panel DFS scan ở góc dưới bên trái màn hình game.
+        DFS flood-fill từ người chơi đã đếm số lượng vật phẩm có thể tiếp cận.
+        """
+        if not getattr(self, "dfs_scan_result", None):
+            return
+        if self.state != "playing":
+            return
+        counts = self.dfs_scan_result
+        # Tổng vật phẩm có thể nhặt
+        total_pickups = (counts.get("weapon", 0) + counts.get("weapon_drop", 0)
+                         + counts.get("ammo", 0) + counts.get("heal", 0)
+                         + counts.get("armor", 0))
+        if total_pickups == 0 and counts.get("mission", 0) == 0:
+            return
+
+        # Panel geometry - bottom-left, above popup area
+        panel_x = 6
+        panel_y = MAP_HEIGHT - 200
+        panel_w = 222
+        panel_h = 122
+
+        # Glassmorphism dark background
+        panel_surf = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+        pygame.draw.rect(panel_surf, (8, 10, 18, 185), (0, 0, panel_w, panel_h), border_radius=12)
+        pygame.draw.rect(panel_surf, (0, 190, 255, 120), (0, 0, panel_w, panel_h), 1, border_radius=12)
+        # Title bar
+        pygame.draw.rect(panel_surf, (0, 100, 160, 90), (0, 0, panel_w, 26),
+                         border_top_left_radius=12, border_top_right_radius=12)
+        # Title
+        title_surf = self.font_small.render("DFS Scan - Vat pham ban do", True, (0, 220, 255))
+        panel_surf.blit(title_surf, (8, 5))
+
+        # Item rows: 2x2 grid
+        items_info = [
+            ("Sung",  counts.get("weapon", 0) + counts.get("weapon_drop", 0), (255, 200, 60)),
+            ("Dan",   counts.get("ammo", 0),   (80, 200, 255)),
+            ("Y te",  counts.get("heal", 0),   (80, 230, 120)),
+            ("Giap",  counts.get("armor", 0),  (180, 120, 255)),
+        ]
+        col_w = panel_w // 2
+        for i, (label, cnt, col) in enumerate(items_info):
+            col_x = (i % 2) * col_w + 8
+            row_yy = 32 + (i // 2) * 36
+
+            # Count bubble
+            bubble = pygame.Surface((32, 22), pygame.SRCALPHA)
+            pygame.draw.rect(bubble, (*col[:3], 60), (0, 0, 32, 22), border_radius=6)
+            pygame.draw.rect(bubble, (*col[:3], 180), (0, 0, 32, 22), 1, border_radius=6)
+            cnt_surf = self.font_small.render(str(cnt), True, col)
+            bubble.blit(cnt_surf, cnt_surf.get_rect(center=(16, 11)))
+            panel_surf.blit(bubble, (col_x, row_yy))
+
+            # Label
+            lbl_surf = self.font_small.render(label, True, (200, 200, 215))
+            panel_surf.blit(lbl_surf, (col_x + 36, row_yy + 4))
+
+        # Algorithm badge bottom - tiles visited
+        tiles_visited = len(getattr(self, "dfs_scan_visited", set()))
+        algo_txt = f"DFS | {tiles_visited} o da quet"
+        badge = self.font_small.render(algo_txt, True, (0, 180, 220))
+        panel_surf.blit(badge, (8, panel_h - 20))
+
+        surface.blit(panel_surf, (panel_x, panel_y))
 
     def draw(self):
         screen.fill(BLACK)
@@ -2486,8 +2732,11 @@ class Game:
         # Darkness overlay (power-out ambience)
         self.draw_darkness(screen)
         
-        # DRAW PATH ON TOP OF DARKNESS so it glows
+        # DRAW BFS objective path (cyan)
         self.draw_path_overlay(screen)
+        
+        # DRAW Heuristic item path (orange) on top of darkness
+        self.draw_heuristic_item_path(screen)
         
         # HUD mission always visible
         # self.draw_mission_hud(screen)
@@ -2522,12 +2771,17 @@ class Game:
         surface.blit(panel, (rect.x, rect.y))
 
     def draw_darkness(self, surface):
-        """Simulate blackout with cached surfaces for performance."""
+        """Simulate blackout with cached surfaces for performance.
+        Màn hình sáng khi: power_restored=True HOẶC gate_opened=True.
+        Màn hình tối khi chưa mở cổng và chưa có điện.
+        """
+        gate_opened = bool(self.mission and self.mission.data.get("gate_opened", False))
         power_on = bool(self.mission and self.mission.data.get("power_restored", False))
-        base_alpha = 90 if power_on else 220
+        is_lit = power_on or gate_opened  # Sáng khi đã mở cổng hoặc có điện
+        base_alpha = 60 if is_lit else 220
 
-        # Flicker when power is off
-        if not power_on:
+        # Flicker when power is off AND gate not opened
+        if not is_lit:
             t = pygame.time.get_ticks()
             if (t // 220) % 7 == 0:
                 base_alpha = 245
@@ -2540,7 +2794,7 @@ class Game:
         # The gradient mask is player-relative, so we cache by (base_alpha).
         # Each frame we blit the cached mask at the right offset.
         cache_key = base_alpha
-        radius = 90 if power_on else 60
+        radius = 130 if is_lit else 80  # Rộng hơn: 130px khi sáng, 80px khi tối
         if getattr(self, "_dark_cache_key", None) != cache_key:
             self._dark_cache_key = cache_key
             # Build a small radial gradient surface centred at (0,0)
@@ -2567,12 +2821,14 @@ class Game:
         gx, gy = int(psx) - gr, int(psy) - gr
         darkness.blit(self._dark_grad, (gx, gy), special_flags=pygame.BLEND_RGBA_MIN)
 
-        # --- Flashlight Cone (only when mouse is on game area) ---
+        # --- Flashlight Cone (wider & longer, only when mouse is on game area) ---
         mx, my = pygame.mouse.get_pos()
+        flashlight_angle = 0
         if mx < MAP_WIDTH:
             flashlight_angle = math.atan2(my - psy, mx - psx)
-            cone_len = 400 if power_on else 320
-            cone_width = 0.62
+            # Rộng và xa hơn: 500px khi sáng, 420px khi tối
+            cone_len = 500 if is_lit else 420
+            cone_width = 0.85  # Tăng từ 0.62 → 0.85 (rộng hơn ~37%)
             num_layers = 7   # reduced for performance
             
             # Use a localized surface instead of full screen
@@ -2586,7 +2842,7 @@ class Game:
                 target_alpha = int(base_alpha * frac)
                 c_width = cone_width * (0.4 + 0.6 * frac)
                 points = [(cx, cy)]
-                steps = 8   # reduced for performance
+                steps = 10   # slightly more steps for wider cone smoothness
                 for j in range(steps + 1):
                     a = flashlight_angle - c_width / 2 + (c_width * j / steps)
                     l = cone_len * (0.9 + 0.1 * frac)
@@ -2598,8 +2854,8 @@ class Game:
 
         surface.blit(darkness, (0, 0))
         
-        # 3. Red Eyes for enemies in the dark (only when power is off)
-        if not power_on:
+        # 3. Red Eyes for enemies in the dark (only when not lit)
+        if not is_lit:
             for entry in self.story_enemies:
                 if entry.enemy.is_dead: continue
                 # Enemy world position
@@ -2616,9 +2872,11 @@ class Game:
                 # Check if in cone
                 in_cone = False
                 if mx < MAP_WIDTH:
+                    cone_len_for_eye = 420  # matches dark cone_len
                     angle_to_enemy = math.atan2(ey_world - self.player.y, ex_world - self.player.x)
                     diff = (angle_to_enemy - flashlight_angle + math.pi) % (2 * math.pi) - math.pi
-                    if abs(diff) < (cone_width * 0.6) and dist < cone_len:
+                    cone_width_eye = 0.85
+                    if abs(diff) < (cone_width_eye * 0.6) and dist < cone_len_for_eye:
                         in_cone = True
                 
                 if not in_radial and not in_cone:
@@ -3022,6 +3280,8 @@ class Game:
             for line in wrap_text(self.popup, self.font, popup_rect.width - 28)[:2]:
                 screen.blit(self.font.render(line, True, WHITE), (popup_rect.x + 14, yy))
                 yy += 22
+        # DFS Scan panel: hiển thị số lượng vật phẩm tìm được qua DFS
+        self.draw_dfs_scan_panel(screen)
         nearby_npc = self.npc_near_player()
         nearby_item = self.item_at_player()
         
@@ -3690,18 +3950,27 @@ class Game:
         pygame.draw.circle(screen, WHITE, (knob_x + 10, yy + 15), 12)
         self.settings_buttons["aim_assist"] = toggle_rect
 
-        # 3. Algorithm Selection (Checkboxes/Radio)
+        # 3. Algorithm Selection (Checkboxes/Radio) - chỉ BFS/DFS cho người chơi
         yy += 60
-        screen.blit(self.font.render("Thuật toán tìm đường", True, WHITE), (panel.x + 60, yy))
+        screen.blit(self.font.render("Thuật toán gợi đường (Người chơi)", True, WHITE), (panel.x + 60, yy))
+        desc_texts = [
+            "BFS: Đảm bảo đường ngắn nhất",
+            "DFS: Nhanh, không tối ưu",
+        ]
         for i, mode in enumerate(self.hint_modes):
-            mx = panel.x + 60 + (i % 2) * 220
-            my = yy + 40 + (i // 2) * 45
-            box_rect = pygame.Rect(mx, my, 30, 30)
+            row_x = panel.x + 60 + (i % 2) * 220
+            row_y = yy + 40 + (i // 2) * 55
+            box_rect = pygame.Rect(row_x, row_y, 30, 30)
             pygame.draw.rect(screen, (40, 44, 52), box_rect, border_radius=5)
             if self.hint_mode_index == i:
                 pygame.draw.rect(screen, YELLOW, box_rect.inflate(-10, -10), border_radius=3)
-            screen.blit(self.font.render(mode, True, WHITE), (mx + 45, my + 2))
+            screen.blit(self.font.render(mode, True, WHITE), (row_x + 45, row_y + 2))
+            if i < len(desc_texts):
+                screen.blit(self.font_small.render(desc_texts[i], True, GRAY), (row_x + 45, row_y + 24))
             self.settings_buttons[f"algo_{i}"] = box_rect
+        # Info: quái dùng A*, heuristic tự động tìm đồ
+        info_y = yy + 40 + 2 * 55 + 10
+        screen.blit(self.font_small.render("* Quái dùng A* (tự động) | Nhặt đồ dùng Greedy Heuristic", True, (160, 160, 180)), (panel.x + 60, info_y))
 
         # Back Button
         btn_back = pygame.Rect(panel.centerx - 100, panel.bottom - 80, 200, 50)

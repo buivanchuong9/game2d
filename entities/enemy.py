@@ -358,24 +358,26 @@ class Enemy:
         return True
 
     def pathfind_to_player(self, player):
-        """A* pathfinding implementation with grid-based coordinates"""
+        """Tìm đường đến người chơi bằng A* (từ systems/pathfinding.astar).
+        Quái vật dùng A* - tối ưu hơn BFS/DFS vì cân bằng chi phí g(n) và heuristic h(n).
+        Người chơi chọn BFS hoặc DFS trong Settings để xem gợi ý đường đi.
+        """
         if self.obstacle_map is None:
             return []
 
-        # Convert pixel positions to grid coordinates
+        # Chuyển tọa độ pixel sang ô lưới
         start_x = int(self.x // 16)
         start_y = int(self.y // 16)
         goal_x = int(player.x // 16)
         goal_y = int(player.y // 16)
-        
-        # Clamp to map bounds
+
+        # Giới hạn trong phạm vi bản đồ
         if isinstance(self.obstacle_map, set):
-            # If it's a set, we don't have direct bounds, use default GRID_SIZE
-            max_x, max_y = 44, 44 
+            max_x, max_y = 44, 44
         else:
             max_y = len(self.obstacle_map)
             max_x = len(self.obstacle_map[0]) if max_y > 0 else 0
-        
+
         start_x = max(0, min(start_x, max_x - 1))
         start_y = max(0, min(start_y, max_y - 1))
         goal_x = max(0, min(goal_x, max_x - 1))
@@ -383,47 +385,46 @@ class Enemy:
 
         start = (start_x, start_y)
         goal = (goal_x, goal_y)
-        
+
         if start == goal:
             return []
 
-        frontier = []
-        heapq.heappush(frontier, (0, start))
-        came_from = {}
-        cost_so_far = {}
-        came_from[start] = None
-        cost_so_far[start] = 0
-        
-        found = False
-        while frontier:
-            _, current = heapq.heappop(frontier)
-            
-            if current == goal:
-                found = True
-                break
-                
-            for next in self.get_neighbors(current):
-                new_cost = cost_so_far[current] + 1
-                if next not in cost_so_far or new_cost < cost_so_far[next]:
-                    cost_so_far[next] = new_cost
-                    priority = new_cost + self.heuristic(goal, next)
-                    heapq.heappush(frontier, (priority, next))
-                    came_from[next] = current
-        
-        if not found:
-            return []
+        # --- Dùng A* từ systems/pathfinding (tách biệt khỏi BFS/DFS người chơi) ---
+        try:
+            from systems.pathfinding import astar
+            grid_path = astar(start, goal, max_x, max_y, self.obstacle_map)
+        except Exception:
+            grid_path = []
 
-        # Reconstruct path and convert back to pixel coordinates
-        path = []
-        current = goal
-        while current != start and current in came_from:
-            path.append((
-                current[0] * 16 + 16//2,
-                current[1] * 16 + 16//2
-            ))
-            current = came_from[current]
-        path.reverse()
-        return path
+        if not grid_path:
+            # Fallback: A* nội tuyến nếu import lỗi
+            frontier = []
+            heapq.heappush(frontier, (0, start))
+            came_from = {start: None}
+            cost_so_far = {start: 0}
+            found = False
+            while frontier:
+                _, current = heapq.heappop(frontier)
+                if current == goal:
+                    found = True
+                    break
+                for nxt in self.get_neighbors(current):
+                    new_cost = cost_so_far[current] + 1
+                    if nxt not in cost_so_far or new_cost < cost_so_far[nxt]:
+                        cost_so_far[nxt] = new_cost
+                        heapq.heappush(frontier, (new_cost + self.heuristic(goal, nxt), nxt))
+                        came_from[nxt] = current
+            if not found:
+                return []
+            grid_path = []
+            cur = goal
+            while cur != start and cur in came_from:
+                grid_path.append(cur)
+                cur = came_from[cur]
+            grid_path.reverse()
+
+        # Chuyển đường đi từ ô lưới về tọa độ pixel
+        return [(gx * 16 + 8, gy * 16 + 8) for gx, gy in grid_path]
     
     def update_projectiles(self, player):
         """Update the position of projectiles and check for collisions with the player."""
